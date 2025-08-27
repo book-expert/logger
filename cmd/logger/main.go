@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -94,12 +95,12 @@ func runDaemon(logDir string) {
 	fmt.Println("Example: INFO:Application started")
 	fmt.Println("Press Ctrl+C to stop")
 
-	// Read from stdin and log messages
-	var line string
-	for {
-		_, err := fmt.Scanln(&line)
-		if err != nil {
-			break
+	// Read full lines from stdin and log messages
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue // Skip empty lines
 		}
 
 		// Parse level:message format
@@ -123,6 +124,10 @@ func runDaemon(logDir string) {
 		default:
 			log.Info(line) // Default to info if no level specified
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Error("Error reading from stdin: %v", err)
 	}
 
 	log.System("Logger daemon stopped")
@@ -157,7 +162,8 @@ Single Message Mode:
 Daemon Mode:
   logger -daemon -dir /var/log
   # Then send messages via stdin in format: LEVEL:MESSAGE
-  # Example: echo "ERROR:Database timeout" | logger -daemon
+  # Example: echo "ERROR:Database connection timeout" | logger -daemon -dir /var/log
+  # Or use with pipes: tail -f app.log | logger -daemon -dir /var/log
 
 Log Levels:
   info     - General information

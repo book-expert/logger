@@ -1,12 +1,12 @@
 # Logger
 
-A robust, thread-safe logging system with comprehensive input validation and CLI interface. This standalone logger can be used both as a Go library and as a command-line binary.
+A robust, thread-safe logging system with comprehensive input validation and CLI interface. This standalone logger can be used both as a Go library and as a command-line binary for direct logging operations.
 
 ## Architecture
 
 This project provides both:
 - **Library API** (`logger.go`): Thread-safe logging package for Go applications
-- **CLI Binary** (`cmd/logger/main.go`): Standalone executable for shell scripts and external tools
+- **CLI Binary** (`cmd/logger/main.go`): Standalone executable that accepts log directory, filename, level, and message via command-line flags
 
 ## Features
 
@@ -17,7 +17,7 @@ This project provides both:
 - **Security**: Path validation prevents directory traversal attacks
 - **Performance**: Optimized string building and pre-allocated capacity
 - **Comprehensive Logging Levels**: Info, Warn, Error, Success, Fatal, Panic, System
-- **CLI Interface**: Single message and daemon mode support
+- **CLI Interface**: Single message and daemon mode support (fixed daemon stdin handling)
 - **Wrapper Compatibility**: Designed to work with existing internal logging APIs
 
 ## Installation
@@ -53,12 +53,25 @@ go get logger
 
 #### Daemon Mode (stdin)
 ```bash
-# Start daemon mode
-~/bin/logger -dir ./logs -file app.log -daemon
+# Start daemon mode (creates timestamped log file automatically)
+~/bin/logger -daemon -dir ./logs
 
-# Then send messages in LEVEL:MESSAGE format
-echo "info:Server starting up" | ~/bin/logger -dir ./logs -file app.log -daemon
-echo "error:Connection timeout" | ~/bin/logger -dir ./logs -file app.log -daemon
+# Then send messages in LEVEL:MESSAGE format via stdin
+echo "INFO:Server starting up" | ~/bin/logger -daemon -dir ./logs
+echo "ERROR:Database connection timeout" | ~/bin/logger -daemon -dir ./logs
+echo "SUCCESS:Deployment completed successfully" | ~/bin/logger -daemon -dir ./logs
+
+# Use with pipes for log processing
+tail -f /var/log/app.log | grep ERROR | while read line; do
+    echo "ERROR:$line" | ~/bin/logger -daemon -dir ./logs
+done
+
+# Interactive daemon mode
+~/bin/logger -daemon -dir ./logs
+# Type messages manually:
+# INFO:Starting application
+# WARN:Low disk space detected
+# Ctrl+C to stop
 ```
 
 ### Library API
@@ -90,15 +103,34 @@ func main() {
 The logger is designed to work with wrapper functions that maintain existing APIs:
 
 ```go
-// Example wrapper that calls the binary
+// Example wrapper that calls the binary (actual implementation from book_expert)
+type Logger struct {
+    logDir   string
+    filename string
+}
+
+func New(logDir string, filename string) (*Logger, error) {
+    // Test that the logger binary is available
+    testCmd := exec.Command(os.ExpandEnv("$HOME/bin/logger"),
+        "-dir", logDir,
+        "-file", filename,
+        "-message", "Logger initialized")
+    
+    if err := testCmd.Run(); err != nil {
+        return nil, fmt.Errorf("logger binary test failed: %w", err)
+    }
+    
+    return &Logger{logDir: logDir, filename: filename}, nil
+}
+
 func (l *Logger) Info(format string, args ...any) {
     message := fmt.Sprintf(format, args...)
     cmd := exec.Command(os.ExpandEnv("$HOME/bin/logger"),
         "-dir", l.logDir,
-        "-file", l.filename, 
+        "-file", l.filename,
         "-level", "info",
         "-message", message)
-    _ = cmd.Run() // Run in background
+    _ = cmd.Run() // Execute in background, ignore errors
 }
 ```
 
@@ -241,9 +273,16 @@ make build      # Build binary to ~/bin/logger
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.24+ (tested with Go 1.24 and 1.25)
 - Standard library only (no external dependencies)
 - Unix-like environment (for ~/bin path)
+
+## Testing Environment
+
+Tested on:
+- **OS**: Fedora 42
+- **Kernel**: Linux 6.15.9-201.fc42.x86_64+debug  
+- **Go**: 1.24 and 1.25
 
 ## Thread Safety
 
@@ -301,6 +340,26 @@ log("info", "Python application started")
 log("error", "Database connection failed")
 ```
 
+## Daemon Mode Details
+
+Daemon mode creates a timestamped log file (`daemon-20250827-143052.log`) and processes stdin line by line:
+
+**Input Format**: `LEVEL:MESSAGE`
+- `INFO:Application started`
+- `ERROR:Database connection failed` 
+- `WARN:Low disk space: 15% remaining`
+- `SUCCESS:Backup completed successfully`
+- `FATAL:Critical system failure`
+- `PANIC:Memory corruption detected`
+- `SYSTEM:Configuration reloaded`
+
+**Features**:
+- Handles multi-word messages correctly (fixed bufio.Scanner implementation)
+- Skips empty lines gracefully
+- Defaults to INFO level for lines without level prefix
+- Continues running until Ctrl+C or stdin EOF
+- Perfect for log aggregation and processing pipelines
+
 ## Design Philosophy
 
 This logger follows key design principles:
@@ -309,6 +368,7 @@ This logger follows key design principles:
 - **Wrapper Compatibility**: Maintains existing APIs while leveraging standalone architecture  
 - **Unix Philosophy**: Does one thing well, integrates cleanly with other tools
 - **Defensive Programming**: Graceful handling of edge cases and failures
+- **Real-time Processing**: Daemon mode enables log streaming and processing
 
 ## License
 
