@@ -1,4 +1,4 @@
-package logger
+package logger_test
 
 import (
 	"bufio"
@@ -6,46 +6,94 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"logger"
+)
+
+const (
+	testLogFile        = "test.log"
+	newLoggerError     = "New logger: %v"
+	emptyLogFile       = "empty.log"
+	readLogFileErr     = "read log file: %v"
+	formatLogFile      = "format.log"
+	longLogFile        = "long.log"
+	errorClosingLogger = "Error closing logger: %v"
+	testLogPattern     = "../test.log"
 )
 
 func TestLogger_WritesToStdoutAndFile(t *testing.T) {
+	t.Parallel()
 	logDir := t.TempDir()
-	logger, err := New(logDir, "test.log")
+
+	loggerInstance, err := logger.New(logDir, testLogFile)
 	if err != nil {
-		t.Fatalf("New logger: %v", err)
+		t.Fatalf(newLoggerError, err)
 	}
+
 	defer func() {
-		_ = logger.Close() // Ignore errors in test cleanup
+		err := loggerInstance.Close()
+		if err != nil {
+			t.Logf(errorClosingLogger, err)
+		}
 	}()
 
-	logger.Info("hello %s", "world")
-	logger.Warn("warn %d", 42)
-	logger.Error("err %v", 1)
-	logger.Success("ok")
-	logger.Fatal("system failure: %s", "disk full")
-	logger.Panic("panic condition: %v", "nil pointer")
-	logger.System("system event: %s", "startup complete")
+	testLoggerAllLevels(t, loggerInstance)
+	verifyLogFileContents(t, logDir, testLogFile)
+}
 
-	// Verify file content contains the messages and levels
-	path := filepath.Join(logDir, "test.log")
-	f, err := os.Open(path)
+func testLoggerAllLevels(t *testing.T, loggerInstance *logger.Logger) {
+	t.Helper()
+	loggerInstance.Info("hello %s", "world")
+	loggerInstance.Warn("warn %d", 42)
+	loggerInstance.Error("err %v", 1)
+	loggerInstance.Success("ok")
+	loggerInstance.Fatal("system failure: %s", "disk full")
+	loggerInstance.Panic("panic condition: %v", "nil pointer")
+	loggerInstance.System("system event: %s", "startup complete")
+}
+
+func verifyLogFileContents(t *testing.T, logDir, filename string) {
+	t.Helper()
+
+	path := filepath.Join(logDir, filename)
+
+	// #nosec G304 - Path is from t.TempDir() which is safe
+	file, err := os.Open(path)
 	if err != nil {
 		t.Fatalf("open log file: %v", err)
 	}
+
 	defer func() {
-		_ = f.Close() // Ignore errors in test cleanup
+		err := file.Close()
+		if err != nil {
+			t.Logf("Error closing file: %v", err)
+		}
 	}()
 
-	s := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(file)
+
 	var lines []string
-	for s.Scan() {
-		lines = append(lines, s.Text())
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
 	}
-	if err := s.Err(); err != nil {
+
+	err = scanner.Err()
+	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+
 	joined := strings.Join(lines, "\n")
-	for _, want := range []string{"[INFO] hello world", "[WARN] warn 42", "[ERROR] err 1", "[SUCCESS] ok", "[FATAL] system failure: disk full", "[PANIC] panic condition: nil pointer", "[SYSTEM] system event: startup complete"} {
+
+	expectedMessages := []string{
+		"[INFO] hello world",
+		"[WARN] warn 42",
+		"[ERROR] err 1",
+		"[SUCCESS] ok",
+		"[FATAL] system failure: disk full",
+		"[PANIC] panic condition: nil pointer",
+		"[SYSTEM] system event: startup complete",
+	}
+	for _, want := range expectedMessages {
 		if !strings.Contains(joined, want) {
 			t.Errorf("log file missing %q; got:\n%s", want, joined)
 		}
@@ -53,199 +101,264 @@ func TestLogger_WritesToStdoutAndFile(t *testing.T) {
 }
 
 func TestLogger_CloseIdempotent(t *testing.T) {
+	t.Parallel()
 	logDir := t.TempDir()
-	logger, err := New(logDir, "test2.log")
+
+	loggerInstance, err := logger.New(logDir, "test2.log")
 	if err != nil {
-		t.Fatalf("New logger: %v", err)
+		t.Fatalf(newLoggerError, err)
 	}
-	if err := logger.Close(); err != nil {
+
+	err = loggerInstance.Close()
+	if err != nil {
 		t.Fatalf("first close: %v", err)
 	}
 	// Second close should be safe
-	if err := logger.Close(); err != nil {
+	err = loggerInstance.Close()
+	if err != nil {
 		t.Fatalf("second close: %v", err)
 	}
 }
 
 func TestLogger_ValidatePath(t *testing.T) {
-	tests := []struct {
-		name    string
-		path    string
-		wantErr bool
-	}{
-		{"valid path", "/tmp/logs", false},
-		{"empty path", "", true},
-		{"path traversal dots", "/tmp/../etc", true},
-		{"path traversal tilde", "~/logs", true},
-		{"relative path", "logs", false},
-	}
+	t.Parallel()
+	runValidatePathTest(t, "/tmp/logs", "valid path", false)
+	runValidatePathTest(t, "", "empty path", true)
+	runValidatePathTest(t, "/tmp/../etc", "path traversal dots", true)
+	runValidatePathTest(t, "~/logs", "path traversal tilde", true)
+	runValidatePathTest(t, "logs", "relative path", false)
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validatePath(tt.path)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validatePath() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
+func runValidatePathTest(t *testing.T, path, name string, wantErr bool) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		t.Parallel()
+
+		err := logger.ValidatePath(path)
+		if (err != nil) != wantErr {
+			t.Errorf("validatePath() error = %v, wantErr %v", err, wantErr)
+		}
+	})
 }
 
 func TestLogger_ValidateFilename(t *testing.T) {
-	tests := []struct {
-		name     string
-		filename string
-		wantErr  bool
-	}{
-		{"valid filename", "test.log", false},
-		{"empty filename", "", true},
-		{"filename with slash", "dir/test.log", true},
-		{"filename with backslash", "dir\\test.log", true},
-		{"filename with dots", "../test.log", true},
-		{"filename with tilde", "~test.log", true},
-	}
+	t.Parallel()
+	runValidateFilenameTest(t, testLogFile, "valid filename", false)
+	runValidateFilenameTest(t, "", "empty filename", true)
+	runValidateFilenameTest(t, "dir/test.log", "filename with slash", true)
+	runValidateFilenameTest(t, "dir\\test.log", "filename with backslash", true)
+	runValidateFilenameTest(t, testLogPattern, "filename with dots", true)
+	runValidateFilenameTest(t, "~test.log", "filename with tilde", true)
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateFilename(tt.filename)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateFilename() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
+func runValidateFilenameTest(
+	t *testing.T, filename, name string, wantErr bool,
+) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		t.Parallel()
+
+		err := logger.ValidateFilename(filename)
+		if (err != nil) != wantErr {
+			t.Errorf("validateFilename() error = %v, wantErr %v", err, wantErr)
+		}
+	})
 }
 
 func TestLogger_InvalidLogDir(t *testing.T) {
-	_, err := New("../invalid", "test.log")
+	t.Parallel()
+
+	_, err := logger.New("../invalid", testLogFile)
 	if err == nil {
 		t.Error("expected error for invalid log directory")
 	}
+
 	if !strings.Contains(err.Error(), "invalid log directory") {
 		t.Errorf("expected 'invalid log directory' in error, got: %v", err)
 	}
 }
 
 func TestLogger_InvalidFilename(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
-	_, err := New(tempDir, "../test.log")
+
+	_, err := logger.New(tempDir, "../test.log")
 	if err == nil {
 		t.Error("expected error for invalid filename")
 	}
+
 	if !strings.Contains(err.Error(), "invalid filename") {
 		t.Errorf("expected 'invalid filename' in error, got: %v", err)
 	}
 }
 
 func TestLogger_CreateLogDirIfNotExists(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	newLogDir := filepath.Join(tempDir, "new", "log", "dir")
 
-	logger, err := New(newLogDir, "test.log")
+	loggerInstance := createTestLogger(t, newLogDir, testLogFile)
+	defer closeTestLogger(t, loggerInstance)
+
+	verifyDirectoryCreated(t, newLogDir)
+	verifyLogFileCreated(t, newLogDir, testLogFile)
+}
+
+func createTestLogger(t *testing.T, logDir, filename string) *logger.Logger {
+	t.Helper()
+
+	loggerInstance, err := logger.New(logDir, filename)
 	if err != nil {
 		t.Fatalf("New logger with new directory: %v", err)
 	}
-	defer func() {
-		_ = logger.Close()
-	}()
 
-	// Verify directory was created
-	if _, err := os.Stat(newLogDir); os.IsNotExist(err) {
+	return loggerInstance
+}
+
+func closeTestLogger(t *testing.T, loggerInstance *logger.Logger) {
+	t.Helper()
+
+	err := loggerInstance.Close()
+	if err != nil {
+		t.Logf(errorClosingLogger, err)
+	}
+}
+
+func verifyDirectoryCreated(t *testing.T, dir string) {
+	t.Helper()
+
+	_, err := os.Stat(dir)
+	if os.IsNotExist(err) {
 		t.Error("log directory was not created")
 	}
+}
 
-	// Verify log file was created
-	logPath := filepath.Join(newLogDir, "test.log")
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+func verifyLogFileCreated(t *testing.T, logDir, filename string) {
+	t.Helper()
+
+	logPath := filepath.Join(logDir, filename)
+
+	_, err := os.Stat(logPath)
+	if os.IsNotExist(err) {
 		t.Error("log file was not created")
 	}
 }
 
 func TestLogger_EmptyMessage(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
-	logger, err := New(tempDir, "empty.log")
+
+	loggerInstance, err := logger.New(tempDir, emptyLogFile)
 	if err != nil {
-		t.Fatalf("New logger: %v", err)
+		t.Fatalf(newLoggerError, err)
 	}
+
 	defer func() {
-		_ = logger.Close()
+		err := loggerInstance.Close()
+		if err != nil {
+			t.Logf(errorClosingLogger, err)
+		}
 	}()
 
 	// Test empty format string
-	logger.Info("", "some", "args")
+	loggerInstance.Info("", "some", "args")
 
 	// Verify it logged something (should show "(empty message)")
-	logPath := filepath.Join(tempDir, "empty.log")
+	logPath := filepath.Join(tempDir, emptyLogFile)
+
+	// #nosec G304 - Path is from t.TempDir() which is safe
 	content, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read log file: %v", err)
+		t.Fatalf(readLogFileErr, err)
 	}
+
 	if !strings.Contains(string(content), "(empty message)") {
 		t.Errorf("expected '(empty message)', got: %s", string(content))
 	}
 }
 
 func TestLogger_FormatMismatch(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
-	logger, err := New(tempDir, "format.log")
+
+	loggerInstance, err := logger.New(tempDir, formatLogFile)
 	if err != nil {
-		t.Fatalf("New logger: %v", err)
+		t.Fatalf(newLoggerError, err)
 	}
+
 	defer func() {
-		_ = logger.Close()
+		err := loggerInstance.Close()
+		if err != nil {
+			t.Logf(errorClosingLogger, err)
+		}
 	}()
 
 	// Test format with % but no args - should not panic
-	logger.Info("100% complete")
+	loggerInstance.Info("100% complete")
 
 	// Test format mismatch - this might cause issues but should be handled
-	logger.Warn("value: %d %s", 42) // Missing second arg
+	loggerInstance.Warn("value: %d %s", 42) // Missing second arg
 
 	// Should not crash, and file should exist
-	logPath := filepath.Join(tempDir, "format.log")
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+	logPath := filepath.Join(tempDir, formatLogFile)
+
+	_, err = os.Stat(logPath)
+	if os.IsNotExist(err) {
 		t.Error("log file should exist even with format errors")
 	}
 }
 
 func TestLogger_LongMessage(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
-	logger, err := New(tempDir, "long.log")
+
+	loggerInstance, err := logger.New(tempDir, longLogFile)
 	if err != nil {
-		t.Fatalf("New logger: %v", err)
+		t.Fatalf(newLoggerError, err)
 	}
+
 	defer func() {
-		_ = logger.Close()
+		err := loggerInstance.Close()
+		if err != nil {
+			t.Logf(errorClosingLogger, err)
+		}
 	}()
 
 	// Create a very long message
 	longMsg := strings.Repeat("A", 5000) // Longer than maxLogMessageLength
-	logger.Info("Long message: %s", longMsg)
+	loggerInstance.Info("Long message: %s", longMsg)
 
 	// Verify it was truncated
-	logPath := filepath.Join(tempDir, "long.log")
+	logPath := filepath.Join(tempDir, longLogFile)
+
+	// #nosec G304 - Path is from t.TempDir() which is safe
 	content, err := os.ReadFile(logPath)
 	if err != nil {
-		t.Fatalf("read log file: %v", err)
+		t.Fatalf(readLogFileErr, err)
 	}
+
 	if !strings.Contains(string(content), "[TRUNCATED]") {
-		t.Errorf("expected truncation marker, got length: %d", len(string(content)))
+		t.Errorf("expected truncation marker, got length: %d", len(content))
 	}
 }
 
 func TestLogger_LogAfterClose(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
-	logger, err := New(tempDir, "closed.log")
+
+	loggerInstance, err := logger.New(tempDir, "closed.log")
 	if err != nil {
-		t.Fatalf("New logger: %v", err)
+		t.Fatalf(newLoggerError, err)
 	}
 
 	// Close the logger
-	if err := logger.Close(); err != nil {
+	err = loggerInstance.Close()
+	if err != nil {
 		t.Fatalf("close logger: %v", err)
 	}
 
 	// Try to log after closing - should not panic
-	logger.Info("This should go to stderr")
-	logger.Error("This should also go to stderr")
-
+	loggerInstance.Info("This should go to stderr")
+	loggerInstance.Error("This should also go to stderr")
 	// Should not crash the program
 }

@@ -1,28 +1,37 @@
 # Logger
 
-A robust, thread-safe logging system with comprehensive input validation and CLI interface. This standalone logger can be used both as a Go library and as a command-line binary for direct logging operations.
+A robust, thread-safe logging system with comprehensive input validation and CLI
+interface. This standalone logger can be used both as a Go library and as a
+command-line binary for direct logging operations.
 
 ## Architecture
 
 This project provides both:
+
 - **Library API** (`logger.go`): Thread-safe logging package for Go applications
-- **CLI Binary** (`cmd/logger/main.go`): Standalone executable that accepts log directory, filename, level, and message via command-line flags
+- **CLI Binary** (`cmd/logger/main.go`): Standalone executable that accepts log
+  directory, filename, level, and message via command-line flags
 
 ## Features
 
 - **Thread-Safe**: Concurrent logging with mutex protection
 - **Dual Output**: Writes to both stdout and file simultaneously  
-- **Input Validation**: Handles empty messages, format errors, and invalid inputs gracefully
+- **Input Validation**: Handles empty messages, format errors, and invalid
+  inputs gracefully
 - **System Failure Resilience**: Continues logging even after system failures
 - **Security**: Path validation prevents directory traversal attacks
 - **Performance**: Optimized string building and pre-allocated capacity
-- **Comprehensive Logging Levels**: Info, Warn, Error, Success, Fatal, Panic, System
-- **CLI Interface**: Single message and daemon mode support (fixed daemon stdin handling)
-- **Wrapper Compatibility**: Designed to work with existing internal logging APIs
+- **Comprehensive Logging Levels**: Info, Warn, Error, Success, Fatal, Panic,
+  System
+- **CLI Interface**: Single message and daemon mode support with proper stdin
+  handling
+- **Wrapper Compatibility**: Designed to work with existing internal logging
+  APIs
 
 ## Installation
 
 ### As Binary
+
 ```bash
 # Build to ~/bin (default target)
 make build
@@ -32,6 +41,7 @@ cd cmd/logger && go build -o ~/bin/logger .
 ```
 
 ### As Go Module
+
 ```bash
 go get logger
 ```
@@ -41,17 +51,21 @@ go get logger
 ### Command Line Interface
 
 #### Single Message Mode
+
 ```bash
 # Basic usage
 ~/bin/logger -dir ./logs -file app.log -level info -message "Application started"
 
 # Different log levels
-~/bin/logger -dir ./logs -file app.log -level warn -message "Low disk space: 85% full"
-~/bin/logger -dir ./logs -file app.log -level error -message "Database connection failed"
+~/bin/logger -dir ./logs -file app.log -level warn \
+  -message "Low disk space: 85% full"
+~/bin/logger -dir ./logs -file app.log -level error \
+  -message "Database connection failed"
 ~/bin/logger -dir ./logs -file app.log -level success -message "Deployment completed"
 ```
 
 #### Daemon Mode (stdin)
+
 ```bash
 # Start daemon mode (creates timestamped log file automatically)
 ~/bin/logger -daemon -dir ./logs
@@ -59,7 +73,8 @@ go get logger
 # Then send messages in LEVEL:MESSAGE format via stdin
 echo "INFO:Server starting up" | ~/bin/logger -daemon -dir ./logs
 echo "ERROR:Database connection timeout" | ~/bin/logger -daemon -dir ./logs
-echo "SUCCESS:Deployment completed successfully" | ~/bin/logger -daemon -dir ./logs
+echo "SUCCESS:Deployment completed successfully" | \
+  ~/bin/logger -daemon -dir ./logs
 
 # Use with pipes for log processing
 tail -f /var/log/app.log | grep ERROR | while read line; do
@@ -172,6 +187,7 @@ log.Error("This still works") // Goes to stderr with "(logger closed)" prefix
 ### Constructor
 
 #### `New(logDir string, filename string) (*Logger, error)`
+
 Creates a new Logger instance.
 - `logDir`: Directory for log files (created if doesn't exist)  
 - `filename`: Name of log file
@@ -180,29 +196,37 @@ Creates a new Logger instance.
 ### Logging Methods
 
 #### `Info(format string, args ...any)`
+
 Logs informational messages
 
 #### `Warn(format string, args ...any)`
+
 Logs warning messages
 
 #### `Error(format string, args ...any)`
+
 Logs error messages
 
 #### `Success(format string, args ...any)`
+
 Logs success/completion messages
 
 #### `Fatal(format string, args ...any)`
+
 Logs fatal system errors (does NOT exit unlike log.Fatal)
 
 #### `Panic(format string, args ...any)`
+
 Logs panic-level errors (does NOT panic unlike log.Panic)
 
 #### `System(format string, args ...any)`
+
 Logs system-level events (startup, shutdown, config changes)
 
 ### Resource Management
 
 #### `Close() error`
+
 Closes the log file and releases resources. Safe to call multiple times.
 
 ## Security Features
@@ -246,7 +270,7 @@ Tests cover:
 
 ## Project Structure
 
-```
+```text
 ~/Dev/logger/
 ├── logger.go              # Core logging library
 ├── cmd/logger/
@@ -262,11 +286,11 @@ Tests cover:
 
 ```bash
 # Format, lint, test, and build in proper sequence
-make all
+make dev
 
 # Individual steps
-make format     # Format code with gofmt
-make lint       # Run comprehensive linting (go vet, staticcheck, gosec)
+make fmt        # Format code with gofmt  
+make lint       # Run comprehensive linting
 make test       # Run test suite with coverage
 make build      # Build binary to ~/bin/logger
 ```
@@ -286,14 +310,18 @@ Tested on:
 
 ## Thread Safety
 
-All logging operations are thread-safe and can be called concurrently from multiple goroutines.
+All logging operations are thread-safe and can be called concurrently from
+multiple goroutines.
 
 ## Integration Examples
 
 ### book_expert Integration
-The logger is used in book_expert through wrapper functions that maintain the original internal API while calling the standalone binary underneath.
+
+The logger is used in book_expert through wrapper functions that maintain the
+original internal API while calling the standalone binary underneath.
 
 ### Shell Script Integration
+
 ```bash
 #!/bin/bash
 LOG_DIR="./logs"
@@ -317,6 +345,7 @@ log_info "Script completed"
 ```
 
 ### External Process Integration
+
 The binary design allows any language or system to use the logger:
 
 ```python
@@ -342,11 +371,12 @@ log("error", "Database connection failed")
 
 ## Daemon Mode Details
 
-Daemon mode creates a timestamped log file (`daemon-20250827-143052.log`) and processes stdin line by line:
+Daemon mode creates a timestamped log file (`daemon-20250827-143052.log`) and
+processes stdin line by line:
 
 **Input Format**: `LEVEL:MESSAGE`
 - `INFO:Application started`
-- `ERROR:Database connection failed` 
+- `ERROR:Database connection failed`
 - `WARN:Low disk space: 15% remaining`
 - `SUCCESS:Backup completed successfully`
 - `FATAL:Critical system failure`
@@ -365,7 +395,8 @@ Daemon mode creates a timestamped log file (`daemon-20250827-143052.log`) and pr
 This logger follows key design principles:
 - **No Mocks**: Real implementations only, no fake/mock objects
 - **Security First**: Comprehensive input validation and path sanitization
-- **Wrapper Compatibility**: Maintains existing APIs while leveraging standalone architecture  
+- **Wrapper Compatibility**: Maintains existing APIs while leveraging
+  standalone architecture  
 - **Unix Philosophy**: Does one thing well, integrates cleanly with other tools
 - **Defensive Programming**: Graceful handling of edge cases and failures
 - **Real-time Processing**: Daemon mode enables log streaming and processing

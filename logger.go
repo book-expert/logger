@@ -12,6 +12,7 @@
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -20,7 +21,27 @@ import (
 	"sync"
 )
 
-// Logger provides leveled, thread-safe logging to stdout and a rotating file per run.
+const (
+	pathTraversalDots       = ".."
+	loggerErrorFormatString = "[LOGGER ERROR] Format panic: %v, " +
+		"format=%q, args=%v\n"
+)
+
+// Predefined errors for better error handling.
+var (
+	ErrLogPathOutsideBounds = errors.New(
+		"log path outside directory bounds",
+	)
+	ErrPathCannotBeEmpty        = errors.New("path cannot be empty")
+	ErrPathContainsInvalidChars = errors.New("path contains invalid characters")
+	ErrFilenameCannotBeEmpty    = errors.New("filename cannot be empty")
+	ErrFilenameContainsInvalid  = errors.New(
+		"filename contains invalid characters",
+	)
+)
+
+// Logger provides leveled, thread-safe logging to stdout and a rotating file
+// per run.
 // Keep this simple and dependency-free.
 type Logger struct {
 	mu      sync.Mutex
@@ -29,169 +50,318 @@ type Logger struct {
 	file    *log.Logger
 }
 
-// New creates a new Logger instance that writes to both stdout and a log file
-func New(logDir string, filename string) (*Logger, error) {
-	// Validate and sanitize the log directory path
-	if err := validatePath(logDir); err != nil {
-		return nil, fmt.Errorf("invalid log directory: %w", err)
+// New creates a new Logger instance that writes to both stdout and a log file.
+func New(logDir, filename string) (*Logger, error) {
+	err := validateInputs(logDir, filename)
+	if err != nil {
+		return nil, err
 	}
 
-	// Validate and sanitize the filename
-	if err := validateFilename(filename); err != nil {
-		return nil, fmt.Errorf("invalid filename: %w", err)
+	logPath, err := setupLogDirectory(logDir, filename)
+	if err != nil {
+		return nil, err
 	}
 
-	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		return nil, fmt.Errorf("create log dir: %w", err)
+	err = validateLogPath(logDir, logPath)
+	if err != nil {
+		return nil, err
 	}
-	logPath := filepath.Join(logDir, filename)
 
-	// Additional security check: ensure the final path is within the expected directory
+	f, err := openLogFile(logPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return createLoggerInstance(f), nil
+}
+
+func validateInputs(logDir, filename string) error {
+	err := ValidatePath(logDir)
+	if err != nil {
+		return fmt.Errorf("invalid log directory: %w", err)
+	}
+
+	err = ValidateFilename(filename)
+	if err != nil {
+		return fmt.Errorf("invalid filename: %w", err)
+	}
+
+	return nil
+}
+
+func setupLogDirectory(logDir, filename string) (string, error) {
+	const logDirPerm = 0o750
+
+	err := os.MkdirAll(logDir, logDirPerm)
+	if err != nil {
+		return "", fmt.Errorf("create log dir: %w", err)
+	}
+
+	return filepath.Join(logDir, filename), nil
+}
+
+func validateLogPath(logDir, logPath string) error {
 	absLogDir, err := filepath.Abs(logDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolve log directory: %w", err)
-	}
-	absLogPath, err := filepath.Abs(logPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve log path: %w", err)
-	}
-	// Check if log path is within the log directory using string prefix check
-	// This replaces the deprecated filepath.HasPrefix function
-	if !strings.HasPrefix(absLogPath+string(filepath.Separator), absLogDir+string(filepath.Separator)) {
-		return nil, fmt.Errorf("log path outside directory bounds")
+		return fmt.Errorf("resolve log directory: %w", err)
 	}
 
+	absLogPath, err := filepath.Abs(logPath)
+	if err != nil {
+		return fmt.Errorf("resolve log path: %w", err)
+	}
+
+	if !strings.HasPrefix(
+		absLogPath+string(filepath.Separator),
+		absLogDir+string(filepath.Separator),
+	) {
+		return ErrLogPathOutsideBounds
+	}
+
+	return nil
+}
+
+func openLogFile(logPath string) (*os.File, error) {
+	const logFilePerm = 0o600
 	// #nosec G304 - Path is validated above to prevent directory traversal
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	logFile, err := os.OpenFile(
+		logPath,
+		os.O_CREATE|os.O_APPEND|os.O_WRONLY,
+		logFilePerm,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
+
+	return logFile, nil
+}
+
+func createLoggerInstance(f *os.File) *Logger {
 	return &Logger{
+		mu:      sync.Mutex{},
 		logFile: f,
 		std:     log.New(os.Stdout, "", log.LstdFlags),
 		file:    log.New(f, "", log.LstdFlags),
-	}, nil
+	}
 }
 
-// validatePath ensures the path is safe and doesn't contain directory traversal
-func validatePath(path string) error {
+// ValidatePath ensures the path is safe and doesn't contain directory
+// traversal.
+func ValidatePath(path string) error {
 	if path == "" {
-		return fmt.Errorf("path cannot be empty")
+		return ErrPathCannotBeEmpty
 	}
 
-	// Check for directory traversal attempts
-	if strings.Contains(path, "..") || strings.Contains(path, "~") {
-		return fmt.Errorf("path contains invalid characters")
+	if containsInvalidPathChars(path) {
+		return ErrPathContainsInvalidChars
 	}
 
 	return nil
 }
 
-// validateFilename ensures the filename is safe
-func validateFilename(filename string) error {
+// ValidateFilename ensures the filename is safe.
+func ValidateFilename(filename string) error {
 	if filename == "" {
-		return fmt.Errorf("filename cannot be empty")
+		return ErrFilenameCannotBeEmpty
 	}
 
-	// Check for directory traversal attempts
-	if strings.Contains(filename, "/") || strings.Contains(filename, "\\") ||
-		strings.Contains(filename, "..") || strings.Contains(filename, "~") {
-		return fmt.Errorf("filename contains invalid characters")
+	if containsInvalidFilenameChars(filename) {
+		return ErrFilenameContainsInvalid
 	}
 
 	return nil
 }
 
-// Close closes the log file and releases resources
+func containsInvalidPathChars(path string) bool {
+	return strings.Contains(path, pathTraversalDots) ||
+		strings.Contains(path, "~")
+}
+
+func containsInvalidFilenameChars(filename string) bool {
+	invalidChars := []string{"/", "\\", pathTraversalDots, "~"}
+	for _, char := range invalidChars {
+		if strings.Contains(filename, char) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Close closes the log file and releases resources.
 func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	if l.logFile != nil {
 		err := l.logFile.Close()
 		l.logFile = nil
-		return err
+
+		return fmt.Errorf("close log file: %w", err)
 	}
+
 	return nil
 }
 
-// Info logs an informational message
-func (l *Logger) Info(format string, args ...any) { l.write("INFO", format, args...) }
+// Info logs an informational message.
+func (l *Logger) Info(format string, args ...any) {
+	l.write("INFO", format, args...)
+}
 
-// Warn logs a warning message
-func (l *Logger) Warn(format string, args ...any) { l.write("WARN", format, args...) }
+// Warn logs a warning message.
+func (l *Logger) Warn(format string, args ...any) {
+	l.write("WARN", format, args...)
+}
 
-// Error logs an error message
-func (l *Logger) Error(format string, args ...any) { l.write("ERROR", format, args...) }
+// Error logs an error message.
+func (l *Logger) Error(format string, args ...any) {
+	l.write("ERROR", format, args...)
+}
 
-// Success logs a success message
-func (l *Logger) Success(format string, args ...any) { l.write("SUCCESS", format, args...) }
+// Success logs a success message.
+func (l *Logger) Success(format string, args ...any) {
+	l.write("SUCCESS", format, args...)
+}
 
-// Fatal logs a fatal system error and does NOT exit (unlike log.Fatal)
-func (l *Logger) Fatal(format string, args ...any) { l.write("FATAL", format, args...) }
+// Fatal logs a fatal system error and does NOT exit (unlike log.Fatal).
+func (l *Logger) Fatal(format string, args ...any) {
+	l.write("FATAL", format, args...)
+}
 
-// Panic logs a panic-level error and does NOT panic (unlike log.Panic)
-func (l *Logger) Panic(format string, args ...any) { l.write("PANIC", format, args...) }
+// Panic logs a panic-level error and does NOT panic (unlike log.Panic).
+func (l *Logger) Panic(format string, args ...any) {
+	l.write("PANIC", format, args...)
+}
 
-// System logs system-level events (startup, shutdown, configuration changes)
-func (l *Logger) System(format string, args ...any) { l.write("SYSTEM", format, args...) }
+// System logs system-level events (startup, shutdown, configuration changes).
+func (l *Logger) System(format string, args ...any) {
+	l.write("SYSTEM", format, args...)
+}
 
 const maxLogMessageLength = 4096 // Reasonable limit for log messages
 
-func (l *Logger) write(level string, format string, args ...any) {
+func (l *Logger) write(level, format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Validate inputs
-	if format == "" {
-		format = "(empty message)"
-	}
+	format = l.validateFormat(format)
 
-	// Check if logger is closed
 	if l.logFile == nil {
-		// Logger is closed, only write to stderr as fallback
-		fmt.Fprintf(os.Stderr, "[%s] (logger closed) %s\n", level, l.safeFormat(format, args...))
+		l.writeToStderrFallback(level, format, args...)
+
 		return
 	}
 
-	// Format message safely
-	formattedMsg := l.safeFormat(format, args...)
+	msg := l.prepareMessage(level, format, args...)
+	if msg != "" {
+		l.outputMessage(msg)
+	}
+}
 
-	// Truncate if too long
+func (l *Logger) validateFormat(format string) string {
+	if format == "" {
+		return "(empty message)"
+	}
+
+	return format
+}
+
+func (l *Logger) prepareMessage(level, format string, args ...any) string {
+	formattedMsg := l.safeFormat(format, args...)
 	if len(formattedMsg) > maxLogMessageLength {
 		formattedMsg = formattedMsg[:maxLogMessageLength-20] + "... [TRUNCATED]"
 	}
 
-	// Optimize string formatting with strings.Builder
-	var sb strings.Builder
-	sb.Grow(len(level) + len(formattedMsg) + 32) // Pre-allocate capacity
-	sb.WriteString("[")
-	sb.WriteString(level)
-	sb.WriteString("] ")
-	sb.WriteString(formattedMsg)
-	msg := sb.String()
+	return l.formatLogMessage(level, formattedMsg)
+}
 
-	// Write to stdout - continue even if this fails
+func (l *Logger) outputMessage(msg string) {
 	l.std.Println(msg)
-
-	// Write to file - if this fails, try to log the failure to stderr
 	l.file.Println(msg)
 }
 
-// safeFormat safely formats the message, handling format string errors
-func (l *Logger) safeFormat(format string, args ...any) (result string) {
+func (l *Logger) writeToStderrFallback(level, format string, args ...any) {
+	// Logger is closed, only write to stderr as fallback
+	_, err := fmt.Fprintf(
+		os.Stderr,
+		"[%s] (logger closed) %s\n",
+		level,
+		l.safeFormat(format, args...),
+	)
+	_ = err // Error ignored - cannot log safely
+}
+
+func (l *Logger) formatLogMessage(level, formattedMsg string) string {
+	var stringBuilder strings.Builder
+
+	const extraCapacity = 32
+
+	// Pre-allocate capacity
+	stringBuilder.Grow(len(level) + len(formattedMsg) + extraCapacity)
+
+	var err error
+
+	_, err = stringBuilder.WriteString("[")
+	if err != nil {
+		return "" // Cannot recover from string builder error
+	}
+
+	_, err = stringBuilder.WriteString(level)
+	if err != nil {
+		return ""
+	}
+
+	_, err = stringBuilder.WriteString("] ")
+	if err != nil {
+		return ""
+	}
+
+	_, err = stringBuilder.WriteString(formattedMsg)
+	if err != nil {
+		return ""
+	}
+
+	return stringBuilder.String()
+}
+
+// safeFormat safely formats the message, handling format string errors.
+func (l *Logger) safeFormat(format string, args ...any) string {
 	defer func() {
 		if r := recover(); r != nil {
 			// Format panic recovered - return a safe message
-			fmt.Fprintf(os.Stderr, "[LOGGER ERROR] Format panic: %v, format=%q, args=%v\n", r, format, args)
-			result = fmt.Sprintf("(format error: %s) args=%v", format, args)
+			_, err := fmt.Fprintf(
+				os.Stderr,
+				loggerErrorFormatString,
+				r,
+				format,
+				args,
+			)
+			_ = err // Error ignored - cannot log safely
 		}
 	}()
 
-	// If no args, return format string as-is (handles case where format has % but no args)
+	// If no args, return format string as-is (handles case where format has %
+	// but no args)
 	if len(args) == 0 {
 		return format
 	}
 
 	// Try to format, catch any errors
-	return fmt.Sprintf(format, args...)
+	result := fmt.Sprintf(format, args...)
+
+	if r := recover(); r != nil {
+		// Format panic recovered - return a safe message
+		_, err := fmt.Fprintf(
+			os.Stderr,
+			loggerErrorFormatString,
+			r,
+			format,
+			args,
+		)
+		_ = err // Error ignored - cannot log safely
+
+		return fmt.Sprintf("(format error: %s) args=%v", format, args)
+	}
+
+	return result
 }

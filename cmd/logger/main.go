@@ -3,134 +3,206 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
 	"logger"
 )
 
+const (
+	defaultLogLevel    = "info"
+	logLevelINFO       = "INFO"
+	errorFormat        = "Error: %v\n"
+	errorClosingLogger = "Error closing logger: %v"
+)
+
+var (
+	ErrFileRequired    = errors.New("-file is required")
+	ErrMessageRequired = errors.New("-message is required")
+	ErrUnknownLogLevel = errors.New("unknown log level")
+)
+
 func main() {
-	var (
-		logDir   = flag.String("dir", "./logs", "Log directory")
-		filename = flag.String("file", "", "Log filename (required)")
-		level    = flag.String("level", "info", "Log level (info, warn, error, success, fatal, panic, system)")
-		message  = flag.String("message", "", "Log message (required)")
-		help     = flag.Bool("help", false, "Show help")
-		daemon   = flag.Bool("daemon", false, "Run as daemon service (accept log messages on stdin)")
-	)
+	config := parseFlags()
+
+	if config.help {
+		showHelp()
+
+		return
+	}
+
+	if config.daemon {
+		runDaemon(config.logDir)
+
+		return
+	}
+
+	runSingleMessage(&config)
+}
+
+type config struct {
+	logDir   string
+	filename string
+	level    string
+	message  string
+	help     bool
+	daemon   bool
+}
+
+func parseFlags() config {
+	var cfg config
+	flag.StringVar(&cfg.logDir, "dir", "./logs", "Log directory")
+	flag.StringVar(&cfg.filename, "file", "", "Log filename (required)")
+	flag.StringVar(&cfg.level, "level", defaultLogLevel,
+		"Log level (info, warn, error, success, fatal, panic, system)")
+	flag.StringVar(&cfg.message, "message", "", "Log message (required)")
+	flag.BoolVar(&cfg.help, "help", false, "Show help")
+	flag.BoolVar(&cfg.daemon, "daemon", false,
+		"Run as daemon service (accept log messages on stdin)")
 	flag.Parse()
 
-	if *help {
-		showHelp()
-		return
-	}
+	return cfg
+}
 
-	if *daemon {
-		runDaemon(*logDir)
-		return
-	}
-
-	if *filename == "" {
-		fmt.Fprintf(os.Stderr, "Error: -file is required\n")
-		showHelp()
-		os.Exit(1)
-	}
-
-	if *message == "" {
-		fmt.Fprintf(os.Stderr, "Error: -message is required\n")
-		showHelp()
-		os.Exit(1)
-	}
-
-	// Create logger
-	log, err := logger.New(*logDir, *filename)
+func runSingleMessage(cfg *config) {
+	err := validateArgs(cfg.filename, cfg.message)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating logger: %v\n", err)
+		log.Printf(errorFormat, err)
+		showHelp()
 		os.Exit(1)
 	}
-	defer func() {
-		_ = log.Close() // Ignore error in defer
-	}()
 
-	// Log the message
-	switch *level {
-	case "info":
-		log.Info(*message)
-	case "warn":
-		log.Warn(*message)
-	case "error":
-		log.Error(*message)
-	case "success":
-		log.Success(*message)
-	case "fatal":
-		log.Fatal(*message)
-	case "panic":
-		log.Panic(*message)
-	case "system":
-		log.System(*message)
-	default:
-		fmt.Fprintf(os.Stderr, "Error: unknown log level '%s'\n", *level)
+	loggerInstance := createLogger(cfg.logDir, cfg.filename)
+	defer closeLogger(loggerInstance)
+
+	err = logMessage(loggerInstance, cfg.level, cfg.message)
+	if err != nil {
+		log.Printf(errorFormat, err)
 		os.Exit(1)
 	}
 }
 
-func runDaemon(logDir string) {
-	// Generate timestamped filename
-	filename := fmt.Sprintf("daemon-%s.log", time.Now().Format("20060102-150405"))
-
-	log, err := logger.New(logDir, filename)
+func createLogger(logDir, filename string) *logger.Logger {
+	loggerInstance, err := logger.New(logDir, filename)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating daemon logger: %v\n", err)
+		log.Printf("Error creating logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() {
-		_ = log.Close() // Ignore error in defer
-	}()
 
-	log.System("Logger daemon started, reading from stdin...")
-	fmt.Printf("Logger daemon started: %s/%s\n", logDir, filename)
-	fmt.Println("Send log messages in format: LEVEL:MESSAGE")
-	fmt.Println("Example: INFO:Application started")
-	fmt.Println("Press Ctrl+C to stop")
+	return loggerInstance
+}
 
-	// Read full lines from stdin and log messages
+func closeLogger(loggerInstance *logger.Logger) {
+	err := loggerInstance.Close()
+	if err != nil {
+		log.Printf(errorClosingLogger, err)
+	}
+}
+
+func validateArgs(filename, message string) error {
+	if filename == "" {
+		return ErrFileRequired
+	}
+
+	if message == "" {
+		return ErrMessageRequired
+	}
+
+	return nil
+}
+
+func getLevelHandlers() map[string]func(*logger.Logger, string) {
+	return map[string]func(*logger.Logger, string){
+		"info":    func(l *logger.Logger, msg string) { l.Info(msg) },
+		"warn":    func(l *logger.Logger, msg string) { l.Warn(msg) },
+		"error":   func(l *logger.Logger, msg string) { l.Error(msg) },
+		"success": func(l *logger.Logger, msg string) { l.Success(msg) },
+		"fatal":   func(l *logger.Logger, msg string) { l.Fatal(msg) },
+		"panic":   func(l *logger.Logger, msg string) { l.Panic(msg) },
+		"system":  func(l *logger.Logger, msg string) { l.System(msg) },
+	}
+}
+
+func logMessage(loggerInstance *logger.Logger, level, message string) error {
+	handlers := getLevelHandlers()
+
+	handler, exists := handlers[level]
+	if !exists {
+		return fmt.Errorf("%w: '%s'", ErrUnknownLogLevel, level)
+	}
+
+	handler(loggerInstance, message)
+
+	return nil
+}
+
+func runDaemon(logDir string) {
+	filename := generateDaemonFilename()
+
+	loggerInstance := createLogger(logDir, filename)
+	defer closeLogger(loggerInstance)
+
+	startDaemon(loggerInstance, logDir, filename)
+	processDaemonInput(loggerInstance)
+	loggerInstance.System("Logger daemon stopped")
+}
+
+func generateDaemonFilename() string {
+	return fmt.Sprintf(
+		"daemon-%s.log",
+		time.Now().Format("20060102-150405"),
+	)
+}
+
+func startDaemon(loggerInstance *logger.Logger, logDir, filename string) {
+	loggerInstance.System("Logger daemon started, reading from stdin...")
+	log.Printf("Logger daemon started: %s/%s\n", logDir, filename)
+	log.Println("Send log messages in format: LEVEL:MESSAGE")
+	log.Println("Example: INFO:Application started")
+	log.Println("Press Ctrl+C to stop")
+}
+
+func processDaemonInput(loggerInstance *logger.Logger) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line == "" {
-			continue // Skip empty lines
-		}
-
-		// Parse level:message format
-		level, message := parseLogLine(line)
-
-		switch level {
-		case "INFO":
-			log.Info(message)
-		case "WARN":
-			log.Warn(message)
-		case "ERROR":
-			log.Error(message)
-		case "SUCCESS":
-			log.Success(message)
-		case "FATAL":
-			log.Fatal(message)
-		case "PANIC":
-			log.Panic(message)
-		case "SYSTEM":
-			log.System(message)
-		default:
-			log.Info(line) // Default to info if no level specified
+		if line != "" {
+			level, message := parseLogLine(line)
+			logMessageInDaemon(loggerInstance, level, message)
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		log.Error("Error reading from stdin: %v", err)
+	err := scanner.Err()
+	if err != nil {
+		loggerInstance.Error("Error reading from stdin: %v", err)
+	}
+}
+
+func getDaemonLevelHandlers() map[string]func(*logger.Logger, string) {
+	return map[string]func(*logger.Logger, string){
+		logLevelINFO: func(l *logger.Logger, msg string) { l.Info(msg) },
+		"WARN":       func(l *logger.Logger, msg string) { l.Warn(msg) },
+		"ERROR":      func(l *logger.Logger, msg string) { l.Error(msg) },
+		"SUCCESS":    func(l *logger.Logger, msg string) { l.Success(msg) },
+		"FATAL":      func(l *logger.Logger, msg string) { l.Fatal(msg) },
+		"PANIC":      func(l *logger.Logger, msg string) { l.Panic(msg) },
+		"SYSTEM":     func(l *logger.Logger, msg string) { l.System(msg) },
+	}
+}
+
+func logMessageInDaemon(loggerInstance *logger.Logger, level, message string) {
+	handlers := getDaemonLevelHandlers()
+
+	handler, exists := handlers[level]
+	if !exists {
+		handler = func(l *logger.Logger, msg string) { l.Info(msg) }
 	}
 
-	log.System("Logger daemon stopped")
+	handler(loggerInstance, message)
 }
 
 func parseLogLine(line string) (string, string) {
@@ -139,18 +211,20 @@ func parseLogLine(line string) (string, string) {
 			return line[:i], line[i+1:]
 		}
 	}
-	return "INFO", line
+
+	return logLevelINFO, line
 }
 
 func showHelp() {
-	fmt.Println(`Logger - Standalone logging service
+	log.Println(`Logger - Standalone logging service
 
 Usage: logger [options]
 
 Options:
   -dir PATH        Log directory (default: ./logs)
   -file NAME       Log filename (required for single message mode)
-  -level LEVEL     Log level: info, warn, error, success, fatal, panic, system (default: info)
+  -level LEVEL     Log level: info, warn, error, success, fatal, panic, system
+                   (default: info)
   -message TEXT    Log message (required for single message mode)
   -daemon          Run as daemon service, reading log messages from stdin
   -help            Show this help message
@@ -162,7 +236,8 @@ Single Message Mode:
 Daemon Mode:
   logger -daemon -dir /var/log
   # Then send messages via stdin in format: LEVEL:MESSAGE
-  # Example: echo "ERROR:Database connection timeout" | logger -daemon -dir /var/log
+  # Example: echo "ERROR:Database connection timeout" | \\
+  #   logger -daemon -dir /var/log
   # Or use with pipes: tail -f app.log | logger -daemon -dir /var/log
 
 Log Levels:
