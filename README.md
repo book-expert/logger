@@ -1,406 +1,116 @@
-# Logger
+# AI Tokenizer
 
-A robust, thread-safe logging system with comprehensive input validation and CLI
-interface. This standalone logger can be used both as a Go library and as a
-command-line binary for direct logging operations.
+A simple and efficient Go library for token estimation in text processing pipelines.
 
-## Architecture
+This library is ideal for scenarios where a fast, dependency-free approximation of token count is needed without the overhead of a full, model-specific tokenizer.
 
-This project provides both:
-
-- **Library API** (`logger.go`): Thread-safe logging package for Go applications
-- **CLI Binary** (`cmd/logger/main.go`): Standalone executable that accepts log
-  directory, filename, level, and message via command-line flags
+---
 
 ## Features
 
-- **Thread-Safe**: Concurrent logging with mutex protection
-- **Dual Output**: Writes to both stdout and file simultaneously  
-- **Input Validation**: Handles empty messages, format errors, and invalid
-  inputs gracefully
-- **System Failure Resilience**: Continues logging even after system failures
-- **Security**: Path validation prevents directory traversal attacks
-- **Performance**: Optimized string building and pre-allocated capacity
-- **Comprehensive Logging Levels**: Info, Warn, Error, Success, Fatal, Panic,
-  System
-- **CLI Interface**: Single message and daemon mode support with proper stdin
-  handling
-- **Wrapper Compatibility**: Designed to work with existing internal logging
-  APIs
+- **⚡️ High Performance**: Optimized for speed with minimal memory allocations using a single-pass processor and efficient string building.
+- **💡 Simple Tokenization**: Uses a straightforward algorithm where special characters are counted individually and regular text is estimated at approximately 2 characters per token.
+- **✍️ Unicode Normalization**: Robustly converts Unicode text (e.g., `café`, `Müller`) into its ASCII equivalent by removing diacritics and folding special characters.
+- **📦 Zero Dependencies**: Built using only the Go standard library and the official `golang.org/x/text` package.
+- **🚀 Command-Line Interface**: Includes a simple CLI for easy integration into scripts and shell pipelines.
+
+---
 
 ## Installation
 
-### As Binary
-
 ```bash
-# Build to ~/bin (default target)
-make build
-
-# Or build manually
-cd cmd/logger && go build -o ~/bin/logger .
+go get github.com/nnikolov3/ai-tokenizer
 ```
 
-### As Go Module
+---
 
-```bash
-go get logger
-```
-
-## Usage
-
-### Command Line Interface
-
-#### Single Message Mode
-
-```bash
-# Basic usage
-~/bin/logger -dir ./logs -file app.log -level info -message "Application started"
-
-# Different log levels
-~/bin/logger -dir ./logs -file app.log -level warn \
-  -message "Low disk space: 85% full"
-~/bin/logger -dir ./logs -file app.log -level error \
-  -message "Database connection failed"
-~/bin/logger -dir ./logs -file app.log -level success -message "Deployment completed"
-```
-
-#### Daemon Mode (stdin)
-
-```bash
-# Start daemon mode (creates timestamped log file automatically)
-~/bin/logger -daemon -dir ./logs
-
-# Then send messages in LEVEL:MESSAGE format via stdin
-echo "INFO:Server starting up" | ~/bin/logger -daemon -dir ./logs
-echo "ERROR:Database connection timeout" | ~/bin/logger -daemon -dir ./logs
-echo "SUCCESS:Deployment completed successfully" | \
-  ~/bin/logger -daemon -dir ./logs
-
-# Use with pipes for log processing
-tail -f /var/log/app.log | grep ERROR | while read line; do
-    echo "ERROR:$line" | ~/bin/logger -daemon -dir ./logs
-done
-
-# Interactive daemon mode
-~/bin/logger -daemon -dir ./logs
-# Type messages manually:
-# INFO:Starting application
-# WARN:Low disk space detected
-# Ctrl+C to stop
-```
-
-### Library API
+## Quick Start
 
 ```go
 package main
 
 import (
-    "logger"
+	"fmt"
+	"github.com/nnikolov3/ai-tokenizer"
 )
 
 func main() {
-    // Create logger with directory and filename
-    log, err := logger.New("./logs", "app.log")
-    if err != nil {
-        panic(err)
-    }
-    defer log.Close()
-    
-    log.Info("Application starting up")
-    log.Warn("Low disk space: %d%% remaining", 15)
-    log.Error("Failed to connect to database: %v", err)
-    log.Success("Database connection established")
+	tok := tokenizer.NewTokenizer()
+
+	// Estimate tokens in a string
+	count := tok.EstimateTokens("Hello, world!")
+	fmt.Printf("Token count: %d\n", count) // Output: 9
+
+	// Normalize Unicode text to clean ASCII
+	normalized := tok.Normalize("café naïve")
+	fmt.Printf("Normalized: %s\n", normalized) // Output: cafe naive
 }
 ```
 
-### Wrapper Integration
-
-The logger is designed to work with wrapper functions that maintain existing APIs:
-
-```go
-// Example wrapper that calls the binary (actual implementation from book_expert)
-type Logger struct {
-    logDir   string
-    filename string
-}
-
-func New(logDir string, filename string) (*Logger, error) {
-    // Test that the logger binary is available
-    testCmd := exec.Command(os.ExpandEnv("$HOME/bin/logger"),
-        "-dir", logDir,
-        "-file", filename,
-        "-message", "Logger initialized")
-    
-    if err := testCmd.Run(); err != nil {
-        return nil, fmt.Errorf("logger binary test failed: %w", err)
-    }
-    
-    return &Logger{logDir: logDir, filename: filename}, nil
-}
-
-func (l *Logger) Info(format string, args ...any) {
-    message := fmt.Sprintf(format, args...)
-    cmd := exec.Command(os.ExpandEnv("$HOME/bin/logger"),
-        "-dir", l.logDir,
-        "-file", l.filename,
-        "-level", "info",
-        "-message", message)
-    _ = cmd.Run() // Execute in background, ignore errors
-}
-```
-
-### System and Critical Logging
-
-```go
-// System events
-log.System("Server startup complete")
-log.System("Configuration reloaded")
-
-// Critical errors that don't exit the program
-log.Fatal("Critical system failure: %s", "disk full")
-log.Panic("Memory corruption detected")
-```
-
-### Robust Error Handling
-
-The logger handles various edge cases gracefully:
-
-```go
-// Empty messages
-log.Info("") // Logs: "[INFO] (empty message)"
-
-// Format string mismatches
-log.Info("Progress: %d%%") // Logs: "[INFO] Progress: %d%%" (no panic)
-log.Warn("Values: %s %d", "test") // Logs: "[WARN] Values: test %!d(MISSING)"
-
-// Very long messages (automatically truncated)
-longMessage := strings.Repeat("data", 2000)
-log.Info("Large payload: %s", longMessage) // Automatically truncated with "[TRUNCATED]"
-
-// Logging after logger is closed (graceful fallback to stderr)
-log.Close()
-log.Error("This still works") // Goes to stderr with "(logger closed)" prefix
-```
+---
 
 ## API Reference
 
-### Constructor
+### `NewTokenizer() *Tokenizer`
 
-#### `New(logDir string, filename string) (*Logger, error)`
+Creates and returns a new tokenizer instance.
 
-Creates a new Logger instance.
-- `logDir`: Directory for log files (created if doesn't exist)  
-- `filename`: Name of log file
-- Returns: Logger instance or error if invalid paths/permissions
+### `EstimateTokens(text string) int`
 
-### Logging Methods
+Estimates the number of tokens in the given text.
 
-#### `Info(format string, args ...any)`
+- **Special characters** (whitespace, punctuation, symbols) count as **1 token** each.
+- Sequences of **regular characters** (letters and digits) are counted as `ceil(length / 2)`.
 
-Logs informational messages
+### `Normalize(text string) string`
 
-#### `Warn(format string, args ...any)`
+Converts a Unicode string to its closest ASCII equivalent. This process involves removing diacritics (`é` → `e`), converting ligatures (`ß` → `ss`), and filtering out unsupported characters.
 
-Logs warning messages
+### `GetModel() string`
 
-#### `Error(format string, args ...any)`
+Returns the tokenizer model name, which is currently `"simple"`.
 
-Logs error messages
+---
 
-#### `Success(format string, args ...any)`
+## Algorithm Details
 
-Logs success/completion messages
+The tokenizer uses a two-step process for estimation:
 
-#### `Fatal(format string, args ...any)`
+1.  **Normalization**: Text is first normalized using Unicode NFD decomposition. The process then removes combining marks (like accents), folds special characters to ASCII equivalents, and filters out any non-convertible characters.
+2.  **Token Counting**: The normalized text is processed character-by-character. Special characters (anything not a letter or digit) are counted as 1 token each. Sequences of regular characters are grouped, and their token count is calculated as `ceil(length / 2)`.
 
-Logs fatal system errors (does NOT exit unlike log.Fatal)
+---
 
-#### `Panic(format string, args ...any)`
+## CLI Usage
 
-Logs panic-level errors (does NOT panic unlike log.Panic)
-
-#### `System(format string, args ...any)`
-
-Logs system-level events (startup, shutdown, config changes)
-
-### Resource Management
-
-#### `Close() error`
-
-Closes the log file and releases resources. Safe to call multiple times.
-
-## Security Features
-
-- **Path Validation**: Prevents directory traversal attacks (`../`, `~`)
-- **Filename Sanitization**: Blocks unsafe filename patterns
-- **Input Sanitization**: Handles malicious format strings safely
-
-## Error Resilience
-
-- **Format String Protection**: Recovers from format panics gracefully
-- **Message Length Limits**: Automatically truncates messages over 4KB
-- **Closed Logger Handling**: Continues logging to stderr if file logger is closed
-- **Thread Safety**: All operations are mutex-protected
-
-## Testing
-
-Run comprehensive tests including edge cases:
+A command-line interface is included for quick estimations and normalization directly from your terminal.
 
 ```bash
-go test -v
+# Install the CLI tool
+go install github.com/nnikolov3/ai-tokenizer/cmd/ai-tokenizer@latest
+
+# Estimate tokens from stdin
+$ echo "Hello, world!" | ai-tokenizer estimate
+Token count: 9
+
+# Normalize text from stdin
+$ echo "café naïve" | ai-tokenizer normalize
+Normalized: cafe naive
 ```
 
-Tests cover:
-- ✅ Basic logging functionality
-- ✅ Path and filename validation
-- ✅ Empty message handling
-- ✅ Format string mismatches
-- ✅ Long message truncation  
-- ✅ Logging after close
-- ✅ Concurrent access safety
-- ✅ Directory creation
-- ✅ Security validation
+---
 
-## Performance
+## Contributing
 
-- Pre-allocated string builders
-- Efficient mutex usage
-- Minimal memory allocations
-- 4KB message size limit prevents excessive memory usage
+Contributions are welcome\! Please follow these steps:
 
-## Project Structure
-
-```text
-~/Dev/logger/
-├── logger.go              # Core logging library
-├── cmd/logger/
-│   └── main.go            # CLI binary implementation  
-├── logger_test.go         # Comprehensive test suite
-├── Makefile              # Build automation (targets ~/bin)
-├── go.mod                # Go module definition
-├── project.toml          # Project configuration
-└── README.md             # This documentation
-```
-
-## Development Workflow
-
-```bash
-# Format, lint, test, and build in proper sequence
-make dev
-
-# Individual steps
-make fmt        # Format code with gofmt  
-make lint       # Run comprehensive linting
-make test       # Run test suite with coverage
-make build      # Build binary to ~/bin/logger
-```
-
-## Requirements
-
-- Go 1.24+ (tested with Go 1.24 and 1.25)
-- Standard library only (no external dependencies)
-- Unix-like environment (for ~/bin path)
-
-## Testing Environment
-
-Tested on:
-- **OS**: Fedora 42
-- **Kernel**: Linux 6.15.9-201.fc42.x86_64+debug  
-- **Go**: 1.24 and 1.25
-
-## Thread Safety
-
-All logging operations are thread-safe and can be called concurrently from
-multiple goroutines.
-
-## Integration Examples
-
-### book_expert Integration
-
-The logger is used in book_expert through wrapper functions that maintain the
-original internal API while calling the standalone binary underneath.
-
-### Shell Script Integration
-
-```bash
-#!/bin/bash
-LOG_DIR="./logs"
-LOG_FILE="script.log"
-
-# Function to log from shell scripts
-log_info() {
-    ~/bin/logger -dir "$LOG_DIR" -file "$LOG_FILE" -level info -message "$1"
-}
-
-log_error() {
-    ~/bin/logger -dir "$LOG_DIR" -file "$LOG_FILE" -level error -message "$1"
-}
-
-# Usage
-log_info "Script started"
-if ! some_command; then
-    log_error "Command failed with exit code $?"
-fi
-log_info "Script completed"
-```
-
-### External Process Integration
-
-The binary design allows any language or system to use the logger:
-
-```python
-import subprocess
-import sys
-
-def log(level, message, log_dir="./logs", log_file="app.log"):
-    try:
-        subprocess.run([
-            f"{os.path.expanduser('~/bin/logger')}",
-            "-dir", log_dir,
-            "-file", log_file, 
-            "-level", level,
-            "-message", message
-        ], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Logging failed: {e}", file=sys.stderr)
-
-# Usage
-log("info", "Python application started")
-log("error", "Database connection failed")
-```
-
-## Daemon Mode Details
-
-Daemon mode creates a timestamped log file (`daemon-20250827-143052.log`) and
-processes stdin line by line:
-
-**Input Format**: `LEVEL:MESSAGE`
-- `INFO:Application started`
-- `ERROR:Database connection failed`
-- `WARN:Low disk space: 15% remaining`
-- `SUCCESS:Backup completed successfully`
-- `FATAL:Critical system failure`
-- `PANIC:Memory corruption detected`
-- `SYSTEM:Configuration reloaded`
-
-**Features**:
-- Handles multi-word messages correctly (fixed bufio.Scanner implementation)
-- Skips empty lines gracefully
-- Defaults to INFO level for lines without level prefix
-- Continues running until Ctrl+C or stdin EOF
-- Perfect for log aggregation and processing pipelines
-
-## Design Philosophy
-
-This logger follows key design principles:
-- **No Mocks**: Real implementations only, no fake/mock objects
-- **Security First**: Comprehensive input validation and path sanitization
-- **Wrapper Compatibility**: Maintains existing APIs while leveraging
-  standalone architecture  
-- **Unix Philosophy**: Does one thing well, integrates cleanly with other tools
-- **Defensive Programming**: Graceful handling of edge cases and failures
-- **Real-time Processing**: Daemon mode enables log streaming and processing
+1.  Fork the repository.
+2.  Create a feature branch: `git checkout -b feature-name`.
+3.  Make your changes and add or update tests.
+4.  Run the test suite: `go test -v`.
+5.  Run the linter: `golangci-lint run`.
+6.  Submit a pull request.
 
 ## License
 
-This project follows the same license as the parent projects it serves.
+This project is licensed under the MIT License. See the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.

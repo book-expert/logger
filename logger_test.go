@@ -1,7 +1,6 @@
 package logger_test
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,78 +10,135 @@ import (
 )
 
 const (
-	testLogFile        = "test.log"
-	newLoggerError     = "New logger: %v"
-	emptyLogFile       = "empty.log"
-	readLogFileErr     = "read log file: %v"
-	formatLogFile      = "format.log"
-	longLogFile        = "long.log"
-	errorClosingLogger = "Error closing logger: %v"
-	testLogPattern     = "../test.log"
+	testLogFile                = "test.log"
+	newLoggerError             = "New logger: %v"
+	emptyLogFile               = "empty.log"
+	readLogFileErr             = "read log file: %v"
+	formatLogFile              = "format.log"
+	longLogFile                = "long.log"
+	errorClosingLogger         = "Error closing logger: %v"
+	testLogPattern             = "../test.log"
+	pathTraversalDotsTest      = "/tmp/../etc"
+	invalidDirTest             = "../invalid"
+	infoLogFormat              = "hello %s"
+	infoLogArg                 = "world"
+	warnLogFormat              = "warn %d"
+	errorLogFormat             = "err %v"
+	successLogMsg              = "ok"
+	fatalLogFormat             = "system failure: %s"
+	fatalLogArg                = "disk full"
+	panicLogFormat             = "panic condition: %v"
+	panicLogArg                = "nil pointer"
+	systemLogFormat            = "system event: %s"
+	systemLogArg               = "startup complete"
+	logFileMissingFmt          = "log file missing %q; got:\n%s"
+	closeIdempotentFile        = "test2.log"
+	firstCloseErrFmt           = "first close: %v"
+	secondCloseErrFmt          = "second close should not error: %v"
+	validPath                  = "/tmp/logs"
+	validPathName              = "valid path"
+	emptyPathName              = "empty path"
+	pathTraversalDotsName      = "path traversal dots"
+	pathTraversalTildeName     = "path traversal tilde"
+	pathWithTilde              = "~/logs"
+	relativePath               = "logs"
+	relativePathName           = "relative path"
+	validatePathErrFmt         = "validatePath() error = %v, wantErr %v"
+	validFilenameName          = "valid filename"
+	emptyFilenameName          = "empty filename"
+	filenameWithSlash          = "dir/test.log"
+	filenameWithSlashName      = "filename with slash"
+	filenameWithBackslash      = "dir\\test.log"
+	filenameWithBackslashName  = "filename with backslash"
+	filenameWithDotsName       = "filename with dots"
+	filenameWithTilde          = "~test.log"
+	filenameWithTildeName      = "filename with tilde"
+	validateFilenameErrFmt     = "validateFilename() error = %v, wantErr %v"
+	expectedErrForInvalidDir   = "expected error for invalid log directory"
+	invalidLogDirMsg           = "invalid log directory"
+	expectedErrMsgFmt          = "expected '%s' in error, got: %v"
+	expectedErrForInvalidFile  = "expected error for invalid filename"
+	invalidFilenameMsg         = "invalid filename"
+	newLogDirPart1             = "new"
+	newLogDirPart2             = "log"
+	newLogDirPart3             = "dir"
+	newLoggerWithDirErrFmt     = "New logger with new directory: %v"
+	logDirNotCreatedMsg        = "log directory was not created"
+	logFileNotCreatedMsg       = "log file was not created"
+	emptyMsgArg1               = "some"
+	emptyMsgArg2               = "args"
+	expectedEmptyMsgContent    = "(empty message)"
+	expectedEmptyMsgFmt        = "expected '%s', got: %s"
+	formatMismatchMsg          = "100% complete"
+	formatMismatchWarnMsg      = "value: %d %s"
+	logFileExistsMsg           = "log file should exist even with format errors"
+	longMsgFormat              = "Long message: %s"
+	expectedTruncationMarker   = "[TRUNCATED]"
+	truncationErrFmt           = "expected truncation marker, got length: %d"
+	closedLogFile              = "closed.log"
+	closeLoggerErrFmt          = "close logger: %v"
+	logAfterCloseInfoMsg       = "This should go to stderr"
+	logAfterCloseErrMsg        = "This should also go to stderr"
+	setupTestLoggerErrFmt      = "setupTestLogger: failed to create logger: %v"
+	setupTestLoggerCloseErrFmt = "setupTestLogger: failed to close logger: %v"
 )
+
+// setupTestLogger is a helper to create and automatically clean up a logger for tests.
+func setupTestLogger(
+	t *testing.T,
+	filename string,
+) (loggerInstance *logger.Logger, logPath string) {
+	t.Helper()
+
+	tempDir := t.TempDir()
+
+	loggerInstance, err := logger.New(tempDir, filename)
+	if err != nil {
+		t.Fatalf(setupTestLoggerErrFmt, err)
+	}
+
+	t.Cleanup(func() {
+		err := loggerInstance.Close()
+		if err != nil {
+			t.Logf(setupTestLoggerCloseErrFmt, err)
+		}
+	})
+
+	logPath = filepath.Join(tempDir, filename)
+
+	return loggerInstance, logPath
+}
 
 func TestLogger_WritesToStdoutAndFile(t *testing.T) {
 	t.Parallel()
-	logDir := t.TempDir()
 
-	loggerInstance, err := logger.New(logDir, testLogFile)
-	if err != nil {
-		t.Fatalf(newLoggerError, err)
-	}
-
-	defer func() {
-		err := loggerInstance.Close()
-		if err != nil {
-			t.Logf(errorClosingLogger, err)
-		}
-	}()
-
+	loggerInstance, logPath := setupTestLogger(t, testLogFile)
 	testLoggerAllLevels(t, loggerInstance)
-	verifyLogFileContents(t, logDir, testLogFile)
+	verifyLogFileContents(t, filepath.Dir(logPath), filepath.Base(logPath))
 }
 
 func testLoggerAllLevels(t *testing.T, loggerInstance *logger.Logger) {
 	t.Helper()
-	loggerInstance.Info("hello %s", "world")
-	loggerInstance.Warn("warn %d", 42)
-	loggerInstance.Error("err %v", 1)
-	loggerInstance.Success("ok")
-	loggerInstance.Fatal("system failure: %s", "disk full")
-	loggerInstance.Panic("panic condition: %v", "nil pointer")
-	loggerInstance.System("system event: %s", "startup complete")
+	loggerInstance.Info(infoLogFormat, infoLogArg)
+	loggerInstance.Warn(warnLogFormat, 42)
+	loggerInstance.Error(errorLogFormat, 1)
+	loggerInstance.Success(successLogMsg)
+	loggerInstance.Fatal(fatalLogFormat, fatalLogArg)
+	loggerInstance.Panic(panicLogFormat, panicLogArg)
+	loggerInstance.System(systemLogFormat, systemLogArg)
 }
 
 func verifyLogFileContents(t *testing.T, logDir, filename string) {
 	t.Helper()
 
 	path := filepath.Join(logDir, filename)
-
-	// #nosec G304 - Path is from t.TempDir() which is safe
-	file, err := os.Open(path)
+	// #nosec G304
+	content, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("open log file: %v", err)
+		t.Fatalf(readLogFileErr, err)
 	}
 
-	defer func() {
-		err := file.Close()
-		if err != nil {
-			t.Logf("Error closing file: %v", err)
-		}
-	}()
-
-	scanner := bufio.NewScanner(file)
-
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-
-	err = scanner.Err()
-	if err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-
-	joined := strings.Join(lines, "\n")
+	contentStr := string(content)
 
 	expectedMessages := []string{
 		"[INFO] hello world",
@@ -94,39 +150,40 @@ func verifyLogFileContents(t *testing.T, logDir, filename string) {
 		"[SYSTEM] system event: startup complete",
 	}
 	for _, want := range expectedMessages {
-		if !strings.Contains(joined, want) {
-			t.Errorf("log file missing %q; got:\n%s", want, joined)
+		if !strings.Contains(contentStr, want) {
+			t.Errorf(logFileMissingFmt, want, contentStr)
 		}
 	}
 }
 
 func TestLogger_CloseIdempotent(t *testing.T) {
 	t.Parallel()
+
 	logDir := t.TempDir()
 
-	loggerInstance, err := logger.New(logDir, "test2.log")
+	loggerInstance, err := logger.New(logDir, closeIdempotentFile)
 	if err != nil {
 		t.Fatalf(newLoggerError, err)
 	}
 
 	err = loggerInstance.Close()
 	if err != nil {
-		t.Fatalf("first close: %v", err)
+		t.Fatalf(firstCloseErrFmt, err)
 	}
-	// Second close should be safe
+
 	err = loggerInstance.Close()
 	if err != nil {
-		t.Fatalf("second close: %v", err)
+		t.Fatalf(secondCloseErrFmt, err)
 	}
 }
 
 func TestLogger_ValidatePath(t *testing.T) {
 	t.Parallel()
-	runValidatePathTest(t, "/tmp/logs", "valid path", false)
-	runValidatePathTest(t, "", "empty path", true)
-	runValidatePathTest(t, "/tmp/../etc", "path traversal dots", true)
-	runValidatePathTest(t, "~/logs", "path traversal tilde", true)
-	runValidatePathTest(t, "logs", "relative path", false)
+	runValidatePathTest(t, validPath, validPathName, false)
+	runValidatePathTest(t, "", emptyPathName, true)
+	runValidatePathTest(t, pathTraversalDotsTest, pathTraversalDotsName, true)
+	runValidatePathTest(t, pathWithTilde, pathTraversalTildeName, true)
+	runValidatePathTest(t, relativePath, relativePathName, false)
 }
 
 func runValidatePathTest(t *testing.T, path, name string, wantErr bool) {
@@ -136,31 +193,29 @@ func runValidatePathTest(t *testing.T, path, name string, wantErr bool) {
 
 		err := logger.ValidatePath(path)
 		if (err != nil) != wantErr {
-			t.Errorf("validatePath() error = %v, wantErr %v", err, wantErr)
+			t.Errorf(validatePathErrFmt, err, wantErr)
 		}
 	})
 }
 
 func TestLogger_ValidateFilename(t *testing.T) {
 	t.Parallel()
-	runValidateFilenameTest(t, testLogFile, "valid filename", false)
-	runValidateFilenameTest(t, "", "empty filename", true)
-	runValidateFilenameTest(t, "dir/test.log", "filename with slash", true)
-	runValidateFilenameTest(t, "dir\\test.log", "filename with backslash", true)
-	runValidateFilenameTest(t, testLogPattern, "filename with dots", true)
-	runValidateFilenameTest(t, "~test.log", "filename with tilde", true)
+	runValidateFilenameTest(t, testLogFile, validFilenameName, false)
+	runValidateFilenameTest(t, "", emptyFilenameName, true)
+	runValidateFilenameTest(t, filenameWithSlash, filenameWithSlashName, true)
+	runValidateFilenameTest(t, filenameWithBackslash, filenameWithBackslashName, true)
+	runValidateFilenameTest(t, testLogPattern, filenameWithDotsName, true)
+	runValidateFilenameTest(t, filenameWithTilde, filenameWithTildeName, true)
 }
 
-func runValidateFilenameTest(
-	t *testing.T, filename, name string, wantErr bool,
-) {
+func runValidateFilenameTest(t *testing.T, filename, name string, wantErr bool) {
 	t.Helper()
 	t.Run(name, func(t *testing.T) {
 		t.Parallel()
 
 		err := logger.ValidateFilename(filename)
 		if (err != nil) != wantErr {
-			t.Errorf("validateFilename() error = %v, wantErr %v", err, wantErr)
+			t.Errorf(validateFilenameErrFmt, err, wantErr)
 		}
 	})
 }
@@ -168,34 +223,41 @@ func runValidateFilenameTest(
 func TestLogger_InvalidLogDir(t *testing.T) {
 	t.Parallel()
 
-	_, err := logger.New("../invalid", testLogFile)
+	_, err := logger.New(invalidDirTest, testLogFile)
 	if err == nil {
-		t.Error("expected error for invalid log directory")
+		t.Error(expectedErrForInvalidDir)
 	}
 
-	if !strings.Contains(err.Error(), "invalid log directory") {
-		t.Errorf("expected 'invalid log directory' in error, got: %v", err)
+	if !strings.Contains(err.Error(), invalidLogDirMsg) {
+		t.Errorf(expectedErrMsgFmt, invalidLogDirMsg, err)
 	}
 }
 
 func TestLogger_InvalidFilename(t *testing.T) {
 	t.Parallel()
+
 	tempDir := t.TempDir()
 
-	_, err := logger.New(tempDir, "../test.log")
+	_, err := logger.New(tempDir, testLogPattern)
 	if err == nil {
-		t.Error("expected error for invalid filename")
+		t.Error(expectedErrForInvalidFile)
 	}
 
-	if !strings.Contains(err.Error(), "invalid filename") {
-		t.Errorf("expected 'invalid filename' in error, got: %v", err)
+	if !strings.Contains(err.Error(), invalidFilenameMsg) {
+		t.Errorf(expectedErrMsgFmt, invalidFilenameMsg, err)
 	}
 }
 
 func TestLogger_CreateLogDirIfNotExists(t *testing.T) {
 	t.Parallel()
+
 	tempDir := t.TempDir()
-	newLogDir := filepath.Join(tempDir, "new", "log", "dir")
+	newLogDir := filepath.Join(
+		tempDir,
+		newLogDirPart1,
+		newLogDirPart2,
+		newLogDirPart3,
+	)
 
 	loggerInstance := createTestLogger(t, newLogDir, testLogFile)
 	defer closeTestLogger(t, loggerInstance)
@@ -209,7 +271,7 @@ func createTestLogger(t *testing.T, logDir, filename string) *logger.Logger {
 
 	loggerInstance, err := logger.New(logDir, filename)
 	if err != nil {
-		t.Fatalf("New logger with new directory: %v", err)
+		t.Fatalf(newLoggerWithDirErrFmt, err)
 	}
 
 	return loggerInstance
@@ -229,7 +291,7 @@ func verifyDirectoryCreated(t *testing.T, dir string) {
 
 	_, err := os.Stat(dir)
 	if os.IsNotExist(err) {
-		t.Error("log directory was not created")
+		t.Error(logDirNotCreatedMsg)
 	}
 }
 
@@ -240,125 +302,71 @@ func verifyLogFileCreated(t *testing.T, logDir, filename string) {
 
 	_, err := os.Stat(logPath)
 	if os.IsNotExist(err) {
-		t.Error("log file was not created")
+		t.Error(logFileNotCreatedMsg)
 	}
 }
 
 func TestLogger_EmptyMessage(t *testing.T) {
 	t.Parallel()
-	tempDir := t.TempDir()
 
-	loggerInstance, err := logger.New(tempDir, emptyLogFile)
-	if err != nil {
-		t.Fatalf(newLoggerError, err)
-	}
-
-	defer func() {
-		err := loggerInstance.Close()
-		if err != nil {
-			t.Logf(errorClosingLogger, err)
-		}
-	}()
-
-	// Test empty format string
-	loggerInstance.Info("", "some", "args")
-
-	// Verify it logged something (should show "(empty message)")
-	logPath := filepath.Join(tempDir, emptyLogFile)
-
-	// #nosec G304 - Path is from t.TempDir() which is safe
+	loggerInstance, logPath := setupTestLogger(t, emptyLogFile)
+	loggerInstance.Info("", emptyMsgArg1, emptyMsgArg2)
+	// #nosec G304
 	content, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf(readLogFileErr, err)
 	}
 
-	if !strings.Contains(string(content), "(empty message)") {
-		t.Errorf("expected '(empty message)', got: %s", string(content))
+	if !strings.Contains(string(content), expectedEmptyMsgContent) {
+		t.Errorf(expectedEmptyMsgFmt, expectedEmptyMsgContent, string(content))
 	}
 }
 
 func TestLogger_FormatMismatch(t *testing.T) {
 	t.Parallel()
-	tempDir := t.TempDir()
 
-	loggerInstance, err := logger.New(tempDir, formatLogFile)
-	if err != nil {
-		t.Fatalf(newLoggerError, err)
-	}
+	loggerInstance, logPath := setupTestLogger(t, formatLogFile)
+	loggerInstance.Info(formatMismatchMsg)
+	loggerInstance.Warn(formatMismatchWarnMsg, 42)
 
-	defer func() {
-		err := loggerInstance.Close()
-		if err != nil {
-			t.Logf(errorClosingLogger, err)
-		}
-	}()
-
-	// Test format with % but no args - should not panic
-	loggerInstance.Info("100% complete")
-
-	// Test format mismatch - this might cause issues but should be handled
-	loggerInstance.Warn("value: %d %s", 42) // Missing second arg
-
-	// Should not crash, and file should exist
-	logPath := filepath.Join(tempDir, formatLogFile)
-
-	_, err = os.Stat(logPath)
+	_, err := os.Stat(logPath)
 	if os.IsNotExist(err) {
-		t.Error("log file should exist even with format errors")
+		t.Error(logFileExistsMsg)
 	}
 }
 
 func TestLogger_LongMessage(t *testing.T) {
 	t.Parallel()
-	tempDir := t.TempDir()
 
-	loggerInstance, err := logger.New(tempDir, longLogFile)
-	if err != nil {
-		t.Fatalf(newLoggerError, err)
-	}
-
-	defer func() {
-		err := loggerInstance.Close()
-		if err != nil {
-			t.Logf(errorClosingLogger, err)
-		}
-	}()
-
-	// Create a very long message
-	longMsg := strings.Repeat("A", 5000) // Longer than maxLogMessageLength
-	loggerInstance.Info("Long message: %s", longMsg)
-
-	// Verify it was truncated
-	logPath := filepath.Join(tempDir, longLogFile)
-
-	// #nosec G304 - Path is from t.TempDir() which is safe
+	loggerInstance, logPath := setupTestLogger(t, longLogFile)
+	longMsg := strings.Repeat("A", 5000)
+	loggerInstance.Info(longMsgFormat, longMsg)
+	// #nosec G304
 	content, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf(readLogFileErr, err)
 	}
 
-	if !strings.Contains(string(content), "[TRUNCATED]") {
-		t.Errorf("expected truncation marker, got length: %d", len(content))
+	if !strings.Contains(string(content), expectedTruncationMarker) {
+		t.Errorf(truncationErrFmt, len(content))
 	}
 }
 
 func TestLogger_LogAfterClose(t *testing.T) {
 	t.Parallel()
+
 	tempDir := t.TempDir()
 
-	loggerInstance, err := logger.New(tempDir, "closed.log")
+	loggerInstance, err := logger.New(tempDir, closedLogFile)
 	if err != nil {
 		t.Fatalf(newLoggerError, err)
 	}
 
-	// Close the logger
 	err = loggerInstance.Close()
 	if err != nil {
-		t.Fatalf("close logger: %v", err)
+		t.Fatalf(closeLoggerErrFmt, err)
 	}
 
-	// Try to log after closing - should not panic
-	loggerInstance.Info("This should go to stderr")
-	loggerInstance.Error("This should also go to stderr")
-	// Should not crash the program
+	loggerInstance.Info(logAfterCloseInfoMsg)
+	loggerInstance.Error(logAfterCloseErrMsg)
 }
