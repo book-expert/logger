@@ -1,3 +1,3 @@
 module github.com/book-expert/logger
 
-go 1.25
+go 1.25.1

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"logger"
+	"github.com/book-expert/logger"
 )
 
 const (
