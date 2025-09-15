@@ -31,7 +31,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/nnikolov3/ai-tokenizer"
+	"github.com/book-expert/logger"
 )
 
 func main() {

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"logger"
+	"github.com/book-expert/logger"
 )
 
 // Constants for command-line flags, usage text, and log messages.
