@@ -150,7 +150,6 @@ func validateLogPath(logDir, logPath string) error {
 		absLogPath+string(filepath.Separator),
 		absLogDir+string(filepath.Separator),
 	) {
-
 		return ErrLogPathOutsideBounds
 	}
 
