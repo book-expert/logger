@@ -18,10 +18,13 @@ test: ## Run tests with coverage
 lint: ## Run comprehensive linting
 	@echo "Running linters..."
 	@go vet ./...
-	@test -z "$$(gofmt -l .)" || (echo "Code needs formatting" && gofmt -l . && exit 1)
+	@test -z "$(gofmt -l .)" || (echo "Code needs formatting" && gofmt -l . && exit 1)
 	@golangci-lint run
 	@staticcheck ./...
 	@gosec ./...
+	@echo "Cleaning caches..."
+	@golangci-lint cache clean
+	@go clean -cache
 	@echo "Linting completed ✅"
 
 fmt: ## Format code
