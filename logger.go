@@ -69,6 +69,8 @@ var (
 )
 
 // Logger provides leveled, thread-safe logging to stdout and a rotating file per run.
+// This struct is the main entry point for the logging functionality and is responsible
+// for managing the log file and writing log messages.
 type Logger struct {
 	logFile *os.File
 	std     *log.Logger
@@ -77,6 +79,8 @@ type Logger struct {
 }
 
 // New creates a new Logger instance that writes to both stdout and a log file.
+// This function is the designated constructor for the Logger struct and ensures
+// that the logger is initialized with a valid log directory and filename.
 func New(logDir, filename string) (*Logger, error) {
 	err := validateInputs(logDir, filename)
 	if err != nil {
@@ -181,6 +185,8 @@ func createLoggerInstance(f *os.File) *Logger {
 }
 
 // ValidatePath ensures the path is safe and doesn't contain directory traversal.
+// This function is a critical security measure to prevent the logger from writing
+// to unauthorized locations.
 func ValidatePath(path string) error {
 	if path == "" {
 		return ErrPathCannotBeEmpty
@@ -193,7 +199,8 @@ func ValidatePath(path string) error {
 	return nil
 }
 
-// ValidateFilename ensures the filename is safe.
+// ValidateFilename ensures the filename is safe. This function is responsible
+// for ensuring that the filename does not contain any invalid characters.
 func ValidateFilename(filename string) error {
 	if filename == "" {
 		return ErrFilenameCannotBeEmpty
@@ -221,7 +228,9 @@ func containsInvalidFilenameChars(filename string) bool {
 	return false
 }
 
-// Close closes the log file and releases resources.
+// Close closes the log file and releases resources. This function is responsible
+// for ensuring that the log file is properly closed and that any resources are
+// released.
 func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -238,48 +247,56 @@ func (l *Logger) Close() error {
 	return nil
 }
 
-// Info logs an informational message.
-func (l *Logger) Info(format string, args ...any) {
-	l.write(logLevelInfo, format, args...)
+// Infof logs an informational message. This function is used for general
+// informational messages that are not critical to the application's operation.
+func (l *Logger) Infof(format string, args ...any) {
+	l.writef(logLevelInfo, format, args...)
 }
 
-// Warn logs a warning message.
-func (l *Logger) Warn(format string, args ...any) {
-	l.write(logLevelWarn, format, args...)
+// Warnf logs a warning message. This function is used for messages that indicate
+// a potential problem but do not prevent the application from continuing.
+func (l *Logger) Warnf(format string, args ...any) {
+	l.writef(logLevelWarn, format, args...)
 }
 
-// Error logs an error message.
-func (l *Logger) Error(format string, args ...any) {
-	l.write(logLevelError, format, args...)
+// Errorf logs an error message. This function is used for messages that indicate
+// a problem that prevents the application from continuing normally.
+func (l *Logger) Errorf(format string, args ...any) {
+	l.writef(logLevelError, format, args...)
 }
 
-// Success logs a success message.
-func (l *Logger) Success(format string, args ...any) {
-	l.write(logLevelSuccess, format, args...)
+// Successf logs a success message. This function is used for messages that indicate
+// that an operation has completed successfully.
+func (l *Logger) Successf(format string, args ...any) {
+	l.writef(logLevelSuccess, format, args...)
 }
 
-// Fatal logs a fatal system error and does NOT exit (unlike log.Fatal).
-func (l *Logger) Fatal(format string, args ...any) {
-	l.write(logLevelFatal, format, args...)
+// Fatalf logs a fatal system error and does NOT exit (unlike log.Fatal). This
+// function is used for messages that indicate a critical error that prevents the
+// application from continuing.
+func (l *Logger) Fatalf(format string, args ...any) {
+	l.writef(logLevelFatal, format, args...)
 }
 
-// Panic logs a panic-level error and does NOT panic (unlike log.Panic).
-func (l *Logger) Panic(format string, args ...any) {
-	l.write(logLevelPanic, format, args...)
+// Panicf logs a panic-level error and does NOT panic (unlike log.Panic). This
+// function is used for messages that indicate a panic condition.
+func (l *Logger) Panicf(format string, args ...any) {
+	l.writef(logLevelPanic, format, args...)
 }
 
-// System logs system-level events (startup, shutdown, configuration changes).
-func (l *Logger) System(format string, args ...any) {
-	l.write(logLevelSystem, format, args...)
+// Systemf logs system-level events (startup, shutdown, configuration changes).
+// This function is used for messages that indicate system-level events.
+func (l *Logger) Systemf(format string, args ...any) {
+	l.writef(logLevelSystem, format, args...)
 }
 
-func (l *Logger) write(level, format string, args ...any) {
+func (l *Logger) writef(level, format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	format = l.validateFormat(format)
 	if l.logFile == nil {
-		l.writeToStderrFallback(level, format, args...)
+		l.writeToStderrFallbackf(level, format, args...)
 
 		return
 	}
@@ -314,7 +331,7 @@ func (l *Logger) outputMessage(msg string) {
 	l.file.Println(msg)
 }
 
-func (l *Logger) writeToStderrFallback(level, format string, args ...any) {
+func (l *Logger) writeToStderrFallbackf(level, format string, args ...any) {
 	// Logger is closed, only write to stderr as fallback.
 	_, err := fmt.Fprintf(
 		os.Stderr,

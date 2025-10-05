@@ -120,13 +120,13 @@ func TestLogger_WritesToStdoutAndFile(t *testing.T) {
 
 func testLoggerAllLevels(t *testing.T, loggerInstance *logger.Logger) {
 	t.Helper()
-	loggerInstance.Info(infoLogFormat, infoLogArg)
-	loggerInstance.Warn(warnLogFormat, 42)
-	loggerInstance.Error(errorLogFormat, 1)
-	loggerInstance.Success(successLogMsg)
-	loggerInstance.Fatal(fatalLogFormat, fatalLogArg)
-	loggerInstance.Panic(panicLogFormat, panicLogArg)
-	loggerInstance.System(systemLogFormat, systemLogArg)
+	loggerInstance.Infof(infoLogFormat, infoLogArg)
+	loggerInstance.Warnf(warnLogFormat, 42)
+	loggerInstance.Errorf(errorLogFormat, 1)
+	loggerInstance.Successf(successLogMsg)
+	loggerInstance.Fatalf(fatalLogFormat, fatalLogArg)
+	loggerInstance.Panicf(panicLogFormat, panicLogArg)
+	loggerInstance.Systemf(systemLogFormat, systemLogArg)
 }
 
 func verifyLogFileContents(t *testing.T, logDir, filename string) {
@@ -311,7 +311,7 @@ func TestLogger_EmptyMessage(t *testing.T) {
 	t.Parallel()
 
 	loggerInstance, logPath := setupTestLogger(t, emptyLogFile)
-	loggerInstance.Info("", emptyMsgArg1, emptyMsgArg2)
+	loggerInstance.Infof("", emptyMsgArg1, emptyMsgArg2)
 	// #nosec G304
 	content, err := os.ReadFile(logPath)
 	if err != nil {
@@ -327,8 +327,8 @@ func TestLogger_FormatMismatch(t *testing.T) {
 	t.Parallel()
 
 	loggerInstance, logPath := setupTestLogger(t, formatLogFile)
-	loggerInstance.Info(formatMismatchMsg)
-	loggerInstance.Warn(formatMismatchWarnMsg, 42)
+	loggerInstance.Infof(formatMismatchMsg)
+	loggerInstance.Warnf(formatMismatchWarnMsg, 42)
 
 	_, err := os.Stat(logPath)
 	if os.IsNotExist(err) {
@@ -341,7 +341,7 @@ func TestLogger_LongMessage(t *testing.T) {
 
 	loggerInstance, logPath := setupTestLogger(t, longLogFile)
 	longMsg := strings.Repeat("A", 5000)
-	loggerInstance.Info(longMsgFormat, longMsg)
+	loggerInstance.Infof(longMsgFormat, longMsg)
 	// #nosec G304
 	content, err := os.ReadFile(logPath)
 	if err != nil {
@@ -368,6 +368,6 @@ func TestLogger_LogAfterClose(t *testing.T) {
 		t.Fatalf(closeLoggerErrFmt, err)
 	}
 
-	loggerInstance.Info(logAfterCloseInfoMsg)
-	loggerInstance.Error(logAfterCloseErrMsg)
+	loggerInstance.Infof(logAfterCloseInfoMsg)
+	loggerInstance.Errorf(logAfterCloseErrMsg)
 }

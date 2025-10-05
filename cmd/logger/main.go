@@ -1,4 +1,4 @@
-// Logger CLI - standalone logging service
+// Package main provides a command-line utility for logging.
 package main
 
 import (
@@ -44,6 +44,7 @@ const (
 	daemonStopMsg        = "Press Ctrl+C to stop"
 	daemonStoppedMsg     = "Logger daemon stopped"
 	daemonStdinErrorFmt  = "error reading from stdin: %v"
+	logLineSplitCount    = 2
 	// Error messages.
 	errFileRequiredMsg    = "-file is required"
 	errMessageRequiredMsg = "-message is required"
@@ -67,7 +68,7 @@ Single Message Mode:
   logger -dir /var/log -file service.log -message "Service started"
 
 Daemon Mode:
-  logger -daemon -dir /var/log
+  logger -daemon -dir /var/var/log
   # Then send messages via stdin in format: LEVEL:MESSAGE
   # Example: echo "ERROR:Database connection timeout" | \
   #   logger -daemon -dir /var/log
@@ -127,6 +128,10 @@ type config struct {
 	message  string
 	help     bool
 	daemon   bool
+}
+
+func showHelp() {
+	log.Println(helpText)
 }
 
 func parseFlags() config {
@@ -199,71 +204,94 @@ func validateArgs(filename, message string) error {
 	return nil
 }
 
+func getLogLevelHandlers() map[string]func(*logger.Logger, string) {
+	return map[string]func(*logger.Logger, string){
+		logLevelINFO: func(l *logger.Logger, msg string) { l.Infof(msg) },
+		"WARN":       func(l *logger.Logger, msg string) { l.Warnf(msg) },
+		"ERROR":      func(l *logger.Logger, msg string) { l.Errorf(msg) },
+		"SUCCESS":    func(l *logger.Logger, msg string) { l.Successf(msg) },
+		"FATAL":      func(l *logger.Logger, msg string) { l.Fatalf(msg) },
+		"PANIC":      func(l *logger.Logger, msg string) { l.Panicf(msg) },
+		"SYSTEM":     func(l *logger.Logger, msg string) { l.Systemf(msg) },
+	}
+}
+
 func getLevelHandlers() map[string]func(*logger.Logger, string) {
 	// getLevelHandlers returns a map of log level handlers. This function is
 	// responsible for mapping log level strings to their corresponding logger
 	// functions.
+	return getLogLevelHandlers()
+}
 
 func logMessage(loggerInstance *logger.Logger, level, message string) error {
-	// logMessage logs a message with the specified level. This function is
-	// responsible for calling the appropriate logger function based on the log
-	// level.
+	handlers := getLevelHandlers()
+
+	handler, exists := handlers[level]
+	if !exists {
+		return fmt.Errorf(errorFmtUnknownLevel, ErrUnknownLogLevel, level)
+	}
+
+	handler(loggerInstance, message)
+
+	return nil
+}
 
 func runDaemon(logDir string) error {
-	// runDaemon runs the logger in daemon mode. This function is responsible for
-	// creating a new logger, starting the daemon, and processing the input from
-	// stdin.
+	filename := generateDaemonFilename()
+
+	loggerInstance, err := createLogger(logDir, filename)
+	if err != nil {
+		return err
+	}
+	defer closeLogger(loggerInstance)
+
+	startDaemon(loggerInstance, logDir, filename)
+	processDaemonInput(loggerInstance)
+	loggerInstance.Systemf(daemonStoppedMsg)
+
+	return nil
+}
 
 func generateDaemonFilename() string {
-	// generateDaemonFilename generates a unique filename for the daemon log file.
-	// This function is responsible for creating a unique filename based on the
-	// current timestamp.
-
+	return fmt.Sprintf(daemonLogFilenameFmt, time.Now().Format(daemonTimestampFmt))
+}
 func startDaemon(loggerInstance *logger.Logger, logDir, filename string) {
-	// startDaemon starts the logger daemon. This function is responsible for
-	// logging the daemon start message and providing instructions to the user.
-
+	loggerInstance.Systemf(daemonStartedMsg)
+	log.Printf(daemonStartedInfoFmt, logDir, filename)
+	log.Println(daemonUsageMsg)
+	log.Println(daemonExampleMsg)
+	log.Println(daemonStopMsg)
+}
 func processDaemonInput(loggerInstance *logger.Logger) {
-	// processDaemonInput processes the input from stdin in daemon mode. This
-	// function is responsible for reading each line from stdin and processing it
-	// as a log message.
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		processLogLine(loggerInstance, scanner.Text())
+	}
 
+	err := scanner.Err()
+	if err != nil {
+		loggerInstance.Errorf(daemonStdinErrorFmt, err)
+	}
+}
 func processLogLine(loggerInstance *logger.Logger, line string) {
-	// processLogLine processes a single log line from stdin. This function is
-	// responsible for parsing the log line and logging the message with the
-	// appropriate level.
+	if line == "" {
+		return
+	}
 
-func getDaemonLevelHandlers() map[string]func(*logger.Logger, string) {
-	// getDaemonLevelHandlers returns a map of log level handlers for daemon mode.
-	// This function is responsible for mapping log level strings to their
-	// corresponding logger functions.
-	return map[string]func(*logger.Logger, string){
-		logLevelINFO: func(l *logger.Logger, msg string) { l.Info(msg) },
-		"WARN":       func(l *logger.Logger, msg string) { l.Warn(msg) },
-		"ERROR":      func(l *logger.Logger, msg string) { l.Error(msg) },
-		"SUCCESS":    func(l *logger.Logger, msg string) { l.Success(msg) },
-		"FATAL":      func(l *logger.Logger, msg string) { l.Fatal(msg) },
-		"PANIC":      func(l *logger.Logger, msg string) { l.Panic(msg) },
-		"SYSTEM":     func(l *logger.Logger, msg string) { l.System(msg) },
+	level, message := parseLogLine(line)
+
+	err := logMessage(loggerInstance, level, message)
+	if err != nil {
+		loggerInstance.Errorf("error logging message from daemon: %v", err)
 	}
 }
 
-func logMessageInDaemon(loggerInstance *logger.Logger, level, message string) {
-	// logMessageInDaemon logs a message with the specified level in daemon mode.
-	// This function is responsible for calling the appropriate logger function
-	// based on the log level, defaulting to INFO if the level is unknown.
-
-func parseLogLine(line string) (level, message string) {
-	// parseLogLine parses a single log line from stdin. This function is
-	// responsible for extracting the log level and message from the log line.
-	level, message, found := strings.Cut(line, ":")
-	if !found {
-		return logLevelINFO, line
+func parseLogLine(line string) (string, string) {
+	parts := strings.SplitN(line, ":", logLineSplitCount)
+	if len(parts) != logLineSplitCount {
+		return logLevelINFO, line // Default to INFO if format is incorrect
 	}
 
-	return level, message
+	return strings.ToUpper(parts[0]), parts[1]
 }
 
-func showHelp() {
-	// showHelp prints the help text to the console. This function is responsible
-	// for displaying the usage information for the CLI.
