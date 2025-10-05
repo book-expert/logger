@@ -1,3 +1,4 @@
+// Package logger is a cmdline utility and a library for logging
 package logger_test
 
 import (

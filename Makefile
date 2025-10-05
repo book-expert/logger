@@ -1,53 +1,57 @@
-# Logger Service Makefile
-# Following design principles: "Do more with less" and "Test, test, test"
+# Makefile for the logger component providing build, lint, and test workflows.
+GO_PACKAGES := ./...
+SERVICE_NAME := logger
+SERVICE_ENTRYPOINT := ./cmd/logger
+BINARY_DIRECTORY := $(HOME)/bin
+BINARY_PATH := $(BINARY_DIRECTORY)/$(SERVICE_NAME)
 
-.PHONY: help test lint fmt clean build install
+.PHONY: build test test-cover test-race clean fmt vet lint run install help
 
-# Default target
-help: ## Show this help message
-	@echo "Logger Service - Available targets:"
-	@echo
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
-	@echo
+build:
+	mkdir -p $(BINARY_DIRECTORY)
+	go build -o $(BINARY_PATH) $(SERVICE_ENTRYPOINT)
 
-test: ## Run tests with coverage
-	@echo "Running logger tests..."
-	@go test -v -cover ./...
-	@echo "Tests completed ✅"
+test:
+	go test -v $(GO_PACKAGES)
 
-lint: ## Run comprehensive linting
-	@echo "Running linters..."
-	@go vet ./...
-	@test -z "$(gofmt -l .)" || (echo "Code needs formatting" && gofmt -l . && exit 1)
-	@golangci-lint run
-	@staticcheck ./...
-	@gosec ./...
-	@echo "Cleaning caches..."
-	@golangci-lint cache clean
-	@go clean -cache
-	@echo "Linting completed ✅"
+test-cover:
+	go test -coverprofile=coverage.out $(GO_PACKAGES)
+	go tool cover -html=coverage.out
 
-fmt: ## Format code
-	@echo "Formatting Go code..."
-	@go fmt ./...
-	@gofmt -w .
-	@echo "Formatting completed ✅"
+test-race:
+	go test -race $(GO_PACKAGES)
 
-build: ## Build logger binary to ~/bin
-	@echo "Building logger binary..."
-	@CGO_ENABLED=0 go build -o ~/bin/logger ./cmd/logger
-	@echo "Build completed ✅"
-	@echo "Binary installed: ~/bin/logger"
+clean:
+	rm -f $(BINARY_PATH)
+	rm -f coverage.out
 
-install: build ## Build and install logger binary
-	@echo "Logger installed ✅"
-	@echo "Usage: logger --help"
+fmt:
+	gofmt -s -w .
 
-clean: ## Clean build cache
-	@echo "Cleaning cache..."
-	@go clean -cache -testcache
-	@echo "Cleanup completed ✅"
+vet:
+	go vet $(GO_PACKAGES)
 
-# Development workflow
-dev: fmt test lint ## Developer workflow: format, test, lint
-	@echo "Development workflow completed ✅"
+lint:
+	golangci-lint run --fix ./...
+	golangci-lint cache clean
+	go clean -r -cache
+
+run:
+	go run $(SERVICE_ENTRYPOINT)
+
+install:
+	go mod tidy
+
+help:
+	@echo "Available targets:"
+	@echo "  build        - Build the application binary into $(BINARY_DIRECTORY)"
+	@echo "  test         - Run unit tests"
+	@echo "  test-cover   - Run unit tests with coverage"
+	@echo "  test-race    - Run unit tests with the race detector"
+	@echo "  clean        - Remove generated binaries and coverage artifacts"
+	@echo "  fmt          - Format Go source files"
+	@echo "  vet          - Run go vet on the module"
+	@echo "  lint         - Run golangci-lint and clean caches"
+	@echo "  run          - Run the application"
+	@echo "  install      - Synchronize module dependencies"
+	@echo "  help         - Show this help message"

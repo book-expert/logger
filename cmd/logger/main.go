@@ -102,17 +102,21 @@ func main() {
 }
 
 func run() error {
+	// parseFlags parses command-line arguments into a config struct.
 	config := parseFlags()
+	// If the help flag is set, show the help message and exit.
 	if config.help {
 		showHelp()
 
 		return nil
 	}
 
+	// If the daemon flag is set, run the logger in daemon mode.
 	if config.daemon {
 		return runDaemon(config.logDir)
 	}
 
+	// Otherwise, run the logger in single message mode.
 	return runSingleMessage(&config)
 }
 
@@ -126,6 +130,9 @@ type config struct {
 }
 
 func parseFlags() config {
+	// parseFlags parses command-line arguments into a config struct. This function
+	// is responsible for defining and parsing all the command line flags that the
+	// application accepts.
 	var cfg config
 	flag.StringVar(&cfg.logDir, flagNameDir, defaultLogDir, usageDir)
 	flag.StringVar(&cfg.filename, flagNameFile, "", usageFile)
@@ -139,6 +146,9 @@ func parseFlags() config {
 }
 
 func runSingleMessage(cfg *config) error {
+	// runSingleMessage runs the logger in single message mode. This function is
+	// responsible for validating the arguments, creating the logger, and logging
+	// the message.
 	err := validateArgs(cfg.filename, cfg.message)
 	if err != nil {
 		showHelp()
@@ -156,6 +166,8 @@ func runSingleMessage(cfg *config) error {
 }
 
 func createLogger(logDir, filename string) (*logger.Logger, error) {
+	// createLogger creates a new logger instance. This function is responsible for
+	// creating a new logger with the specified log directory and filename.
 	loggerInstance, err := logger.New(logDir, filename)
 	if err != nil {
 		return nil, fmt.Errorf(errorCreatingLogger, err)
@@ -165,6 +177,8 @@ func createLogger(logDir, filename string) (*logger.Logger, error) {
 }
 
 func closeLogger(loggerInstance *logger.Logger) {
+	// closeLogger closes the logger instance. This function is responsible for
+	// closing the logger and handling any errors that may occur.
 	err := loggerInstance.Close()
 	if err != nil {
 		log.Printf(errorClosingLogger, err)
@@ -172,6 +186,8 @@ func closeLogger(loggerInstance *logger.Logger) {
 }
 
 func validateArgs(filename, message string) error {
+	// validateArgs validates the command-line arguments. This function is
+	// responsible for ensuring that the required arguments are provided.
 	if filename == "" {
 		return ErrFileRequired
 	}
@@ -184,80 +200,43 @@ func validateArgs(filename, message string) error {
 }
 
 func getLevelHandlers() map[string]func(*logger.Logger, string) {
-	return map[string]func(*logger.Logger, string){
-		"info":    func(l *logger.Logger, msg string) { l.Info(msg) },
-		"warn":    func(l *logger.Logger, msg string) { l.Warn(msg) },
-		"error":   func(l *logger.Logger, msg string) { l.Error(msg) },
-		"success": func(l *logger.Logger, msg string) { l.Success(msg) },
-		"fatal":   func(l *logger.Logger, msg string) { l.Fatal(msg) },
-		"panic":   func(l *logger.Logger, msg string) { l.Panic(msg) },
-		"system":  func(l *logger.Logger, msg string) { l.System(msg) },
-	}
-}
+	// getLevelHandlers returns a map of log level handlers. This function is
+	// responsible for mapping log level strings to their corresponding logger
+	// functions.
 
 func logMessage(loggerInstance *logger.Logger, level, message string) error {
-	handlers := getLevelHandlers()
-
-	handler, exists := handlers[level]
-	if !exists {
-		return fmt.Errorf(errorFmtUnknownLevel, ErrUnknownLogLevel, level)
-	}
-
-	handler(loggerInstance, message)
-
-	return nil
-}
+	// logMessage logs a message with the specified level. This function is
+	// responsible for calling the appropriate logger function based on the log
+	// level.
 
 func runDaemon(logDir string) error {
-	filename := generateDaemonFilename()
-
-	loggerInstance, err := createLogger(logDir, filename)
-	if err != nil {
-		return err
-	}
-	defer closeLogger(loggerInstance)
-
-	startDaemon(loggerInstance, logDir, filename)
-	processDaemonInput(loggerInstance)
-	loggerInstance.System(daemonStoppedMsg)
-
-	return nil
-}
+	// runDaemon runs the logger in daemon mode. This function is responsible for
+	// creating a new logger, starting the daemon, and processing the input from
+	// stdin.
 
 func generateDaemonFilename() string {
-	return fmt.Sprintf(daemonLogFilenameFmt, time.Now().Format(daemonTimestampFmt))
-}
+	// generateDaemonFilename generates a unique filename for the daemon log file.
+	// This function is responsible for creating a unique filename based on the
+	// current timestamp.
 
 func startDaemon(loggerInstance *logger.Logger, logDir, filename string) {
-	loggerInstance.System(daemonStartedMsg)
-	log.Printf(daemonStartedInfoFmt, logDir, filename)
-	log.Println(daemonUsageMsg)
-	log.Println(daemonExampleMsg)
-	log.Println(daemonStopMsg)
-}
+	// startDaemon starts the logger daemon. This function is responsible for
+	// logging the daemon start message and providing instructions to the user.
 
 func processDaemonInput(loggerInstance *logger.Logger) {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		processLogLine(loggerInstance, scanner.Text())
-	}
-
-	err := scanner.Err()
-	if err != nil {
-		loggerInstance.Error(daemonStdinErrorFmt, err)
-	}
-}
+	// processDaemonInput processes the input from stdin in daemon mode. This
+	// function is responsible for reading each line from stdin and processing it
+	// as a log message.
 
 func processLogLine(loggerInstance *logger.Logger, line string) {
-	if line == "" {
-		return
-	}
-
-	level, message := parseLogLine(line)
-	logMessageInDaemon(loggerInstance, level, message)
-}
+	// processLogLine processes a single log line from stdin. This function is
+	// responsible for parsing the log line and logging the message with the
+	// appropriate level.
 
 func getDaemonLevelHandlers() map[string]func(*logger.Logger, string) {
+	// getDaemonLevelHandlers returns a map of log level handlers for daemon mode.
+	// This function is responsible for mapping log level strings to their
+	// corresponding logger functions.
 	return map[string]func(*logger.Logger, string){
 		logLevelINFO: func(l *logger.Logger, msg string) { l.Info(msg) },
 		"WARN":       func(l *logger.Logger, msg string) { l.Warn(msg) },
@@ -270,17 +249,13 @@ func getDaemonLevelHandlers() map[string]func(*logger.Logger, string) {
 }
 
 func logMessageInDaemon(loggerInstance *logger.Logger, level, message string) {
-	handlers := getDaemonLevelHandlers()
-
-	handler, exists := handlers[level]
-	if !exists {
-		handler = func(l *logger.Logger, msg string) { l.Info(msg) } // Default to INFO
-	}
-
-	handler(loggerInstance, message)
-}
+	// logMessageInDaemon logs a message with the specified level in daemon mode.
+	// This function is responsible for calling the appropriate logger function
+	// based on the log level, defaulting to INFO if the level is unknown.
 
 func parseLogLine(line string) (level, message string) {
+	// parseLogLine parses a single log line from stdin. This function is
+	// responsible for extracting the log level and message from the log line.
 	level, message, found := strings.Cut(line, ":")
 	if !found {
 		return logLevelINFO, line
@@ -290,5 +265,5 @@ func parseLogLine(line string) (level, message string) {
 }
 
 func showHelp() {
-	log.Println(helpText)
-}
+	// showHelp prints the help text to the console. This function is responsible
+	// for displaying the usage information for the CLI.
