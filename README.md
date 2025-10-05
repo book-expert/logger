@@ -90,6 +90,29 @@ make test
 
 This will run the tests and display the coverage.
 
+### Architecture Diagram
+
+```mermaid
+graph TD
+    A[Logger Package] --> B[Input Validation]
+    A --> C[File Operations]
+    A --> D[Thread Safety]
+    A --> E[Dual Output Logging]
+    B --> F[Path Validation]
+    B --> G[Filename Validation]
+    C --> H[Log Directory Setup]
+    C --> I[Log File Creation]
+    D --> J[Mutex Locking]
+    E --> K[Stdout Logger]
+    E --> L[File Logger]
+    
+    style A fill:#cde4ff,stroke:#6495ED,stroke-width:2px
+    style B fill:#f9f,stroke:#333,stroke-width:2px
+    style C fill:#fbf,stroke:#333,stroke-width:2px
+    style D fill:#bbf,stroke:#333,stroke-width:2px
+    style E fill:#ddf,stroke:#333,stroke-width:2px
+```
+
 ## License
 
 Distributed under the MIT License. See the `LICENSE` file for more information.
