@@ -14,6 +14,7 @@ package logger
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -184,6 +185,16 @@ func createLoggerInstance(f *os.File) *Logger {
 	}
 }
 
+// NewStreamLogger creates a new Logger instance that writes only to the provided io.Writer.
+func NewStreamLogger(writer io.Writer) *Logger {
+	return &Logger{
+		mu:      sync.Mutex{},
+		logFile: nil,
+		std:     log.New(writer, "", log.LstdFlags),
+		file:    nil,
+	}
+}
+
 // ValidatePath ensures the path is safe and doesn't contain directory traversal.
 // This function is a critical security measure to prevent the logger from writing
 // to unauthorized locations.
@@ -328,7 +339,10 @@ func (l *Logger) prepareMessage(level, format string, args ...any) string {
 
 func (l *Logger) outputMessage(msg string) {
 	l.std.Println(msg)
-	l.file.Println(msg)
+
+	if l.file != nil {
+		l.file.Println(msg)
+	}
 }
 
 func (l *Logger) writeToStderrFallbackf(level, format string, args ...any) {
